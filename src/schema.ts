@@ -75,13 +75,10 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                     message: "Server URL must use http or https"
                 })
             ),
-            branch: z.preprocess(
-                (value) => {
-                    const resolved = resolveOptionString(value, "branch");
-                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
-                },
-                BranchSchema
-            ),
+            branch: z.preprocess((value) => {
+                const resolved = resolveOptionString(value, "branch");
+                return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+            }, BranchSchema),
             error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
         })
     );

@@ -14,27 +14,27 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 
 ```js
 [
-  { name: "@bitsocial/spam-blocker-challenge" },
-  {
-    name: "@bitsocial/ai-moderation-challenge",
-    options: { branch: "allow" },
-    exclude: [{ challenges: [2] }]
-  },
-  {
-    name: "@bitsocial/ai-moderation-challenge",
-    options: { branch: "review" },
-    pendingApproval: true,
-    exclude: [{ challenges: [1] }]
-  }
-]
+    { name: "@bitsocial/spam-blocker-challenge" },
+    {
+        name: "@bitsocial/ai-moderation-challenge",
+        options: { branch: "allow" },
+        exclude: [{ challenges: [2] }]
+    },
+    {
+        name: "@bitsocial/ai-moderation-challenge",
+        options: { branch: "review" },
+        pendingApproval: true,
+        exclude: [{ challenges: [1] }]
+    }
+];
 ```
 
 ## Options
 
-| Option      | Default                                    | Description                                |
-| ----------- | ------------------------------------------ | ------------------------------------------ |
-| `serverUrl` | `https://spamblocker.bitsocial.net/api/v1` | URL of the Bitsocial moderation API        |
-| `branch`    | `allow`                                    | Branch mode: `allow` or `review`           |
+| Option      | Default                                    | Description                                 |
+| ----------- | ------------------------------------------ | ------------------------------------------- |
+| `serverUrl` | `https://spamblocker.bitsocial.net/api/v1` | URL of the Bitsocial moderation API         |
+| `branch`    | `allow`                                    | Branch mode: `allow` or `review`            |
 | `error`     | `Rejected by Bitsocial AI moderation.`     | Error shown when content edits are rejected |
 
 ## Behavior

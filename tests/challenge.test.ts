@@ -142,7 +142,9 @@ describe("Bitsocial AI moderation challenge package", () => {
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: { options: { serverUrl: "https://moderation.example/allow-comment", branch: "allow" } } as CommunityChallengeSetting,
+            challengeSettings: {
+                options: { serverUrl: "https://moderation.example/allow-comment", branch: "allow" }
+            } as CommunityChallengeSetting,
             challengeRequestMessage: createCommentRequest("allowed comment"),
             challengeIndex: 1,
             community
