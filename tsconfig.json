@@ -1,0 +1,13 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "rootDir": "src",
+        "outDir": "dist",
+        "resolvePackageJsonExports": false,
+        "baseUrl": ".",
+        "paths": {
+            "@pkcprotocol/pkc-js/dist/node/*": ["./node_modules/@pkcprotocol/pkc-js/dist/node/*"]
+        }
+    },
+    "include": ["src"]
+}

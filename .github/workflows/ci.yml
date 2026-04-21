@@ -1,0 +1,29 @@
+name: CI
+
+on:
+    pull_request:
+        branches: [master]
+    push:
+        branches: [master]
+
+jobs:
+    ci:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+
+            - run: corepack enable
+
+            - run: corepack yarn install --immutable
+
+            - run: corepack yarn build
+
+            - run: corepack yarn type-check
+
+            - run: corepack yarn test
+
+            - run: corepack yarn format:check

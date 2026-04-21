@@ -1,0 +1,67 @@
+{
+    "name": "@bitsocial/ai-moderation-challenge",
+    "version": "0.1.0",
+    "description": "Bitsocial AI moderation challenge implementation for PKC",
+    "keywords": [
+        "bitsocial",
+        "pkc",
+        "challenge",
+        "moderation",
+        "ai"
+    ],
+    "author": "Bitsocial Labs",
+    "license": "GPL-3.0-or-later",
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "package.json",
+        "README.md",
+        "LICENSE"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/bitsocialnet/ai-moderation-challenge.git"
+    },
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "require": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "scripts": {
+        "build": "node esbuild.config.js && tsc -p tsconfig.json --emitDeclarationOnly",
+        "clean": "rm -rf dist",
+        "test": "vitest run",
+        "type-check": "tsc -p tsconfig.json --noEmit",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "release": "HUSKY=0 release-it --config .release-it.json"
+    },
+    "dependencies": {
+        "@noble/ed25519": "1.7.5",
+        "@pkcprotocol/pkc-js": "0.0.18",
+        "@pkcprotocol/pkc-logger": "0.1.0",
+        "cborg": "4.3.2",
+        "uint8arrays": "5.1.0",
+        "zod": "4.3.5"
+    },
+    "devDependencies": {
+        "@release-it/conventional-changelog": "10.0.1",
+        "esbuild": "0.27.2",
+        "prettier": "3.8.1",
+        "release-it": "19.2.3",
+        "typescript": "6.0.2",
+        "vitest": "4.0.16"
+    },
+    "packageManager": "yarn@4.13.0"
+}
