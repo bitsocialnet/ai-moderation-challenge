@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const DEFAULT_SERVER_URL = "https://spamblocker.bitsocial.net/api/v1";
+export const DEFAULT_SERVER_URL = "https://moderation.bitsocial.net/api/v1";
 export const DEFAULT_ERROR = "Rejected by Bitsocial AI moderation.";
 
 export const BranchSchema = z.enum(["allow", "review"]);

@@ -27,7 +27,7 @@ const optionInputs = [
         label: "Server URL",
         default: DEFAULT_SERVER_URL,
         description: "URL of the Bitsocial moderation server",
-        placeholder: "https://spamblocker.bitsocial.net/api/v1"
+        placeholder: "https://moderation.bitsocial.net/api/v1"
     },
     {
         option: "branch",

@@ -31,11 +31,11 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 
 ## Options
 
-| Option      | Default                                    | Description                                 |
-| ----------- | ------------------------------------------ | ------------------------------------------- |
-| `serverUrl` | `https://spamblocker.bitsocial.net/api/v1` | URL of the Bitsocial moderation API         |
-| `branch`    | `allow`                                    | Branch mode: `allow` or `review`            |
-| `error`     | `Rejected by Bitsocial AI moderation.`     | Error shown when content edits are rejected |
+| Option      | Default                                   | Description                                 |
+| ----------- | ----------------------------------------- | ------------------------------------------- |
+| `serverUrl` | `https://moderation.bitsocial.net/api/v1` | URL of the Bitsocial moderation API         |
+| `branch`    | `allow`                                   | Branch mode: `allow` or `review`            |
+| `error`     | `Rejected by Bitsocial AI moderation.`    | Error shown when content edits are rejected |
 
 ## Behavior
 
