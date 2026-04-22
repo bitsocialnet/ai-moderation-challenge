@@ -47,7 +47,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 
 ## Publishing
 
-The package version is `0.1.0`. The first npm publish must create the package before trusted publishing can be configured:
+The first npm publish must create the package before trusted publishing can be configured:
 
 ```bash
 npm publish --access public
