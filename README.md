@@ -1,11 +1,17 @@
 # @bitsocial/ai-moderation-challenge
 
-Automatic PKC challenge that evaluates Bitsocial comment content against `community.rules` using the hosted Bitsocial AI moderation API.
+Automatic PKC challenge that evaluates Bitsocial comment content against `community.rules` with an OpenAI-compatible model endpoint. The package runs on the community node and does not require a hosted Bitsocial moderation server.
 
 ## Installation
 
 ```bash
 bitsocial challenge install @bitsocial/ai-moderation-challenge
+```
+
+Set the API key on the machine running `bitsocial-cli`:
+
+```bash
+export AI_MODERATION_OPENAI_API_KEY=sk-...
 ```
 
 ## Configuration
@@ -17,33 +23,70 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
     { name: "@bitsocial/spam-blocker-challenge" },
     {
         name: "@bitsocial/ai-moderation-challenge",
-        options: { branch: "allow" },
+        options: {
+            branch: "allow",
+            promptPath: "/root/bitsocial-ai-moderation-prompt.md"
+        },
         exclude: [{ challenges: [2] }]
     },
     {
         name: "@bitsocial/ai-moderation-challenge",
-        options: { branch: "review" },
+        options: {
+            branch: "review",
+            promptPath: "/root/bitsocial-ai-moderation-prompt.md"
+        },
         pendingApproval: true,
         exclude: [{ challenges: [1] }]
     }
 ];
 ```
 
+Challenge options are private community-node settings in `pkc-js`, so `prompt`, `promptPath`, `apiUrl`, and `apiKeyEnv` are not copied into the public community challenge metadata.
+
 ## Options
 
-| Option      | Default                                   | Description                                 |
-| ----------- | ----------------------------------------- | ------------------------------------------- |
-| `serverUrl` | `https://moderation.bitsocial.net/api/v1` | URL of the Bitsocial moderation API         |
-| `branch`    | `allow`                                   | Branch mode: `allow` or `review`            |
-| `error`     | `Rejected by Bitsocial AI moderation.`    | Error shown when content edits are rejected |
+| Option          | Default                                | Description                                                                          |
+| --------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `apiUrl`        | `https://api.openai.com/v1/responses`  | Full OpenAI-compatible endpoint URL                                                  |
+| `apiFormat`     | `responses`                            | Request/response format: `responses` or `chat-completions`                           |
+| `apiKeyEnv`     | `AI_MODERATION_OPENAI_API_KEY`         | Environment variable containing the provider API key                                 |
+| `model`         | `gpt-5.4-mini`                         | Model name sent to the provider                                                      |
+| `branch`        | `allow`                                | Branch mode: `allow` or `review`                                                     |
+| `prompt`        | built-in prompt                        | Private inline system prompt text                                                    |
+| `promptPath`    | none                                   | Private file path for a system prompt on the community node                          |
+| `promptVersion` | `bitsocial-ai-moderation-v1`           | Version string used to separate cached verdicts after prompt changes                 |
+| `error`         | `Rejected by Bitsocial AI moderation.` | Error shown when content edits are rejected or moderation is unavailable for an edit |
+
+Use either `prompt` or `promptPath`, not both.
+
+For providers exposing the chat-completions API shape, set both `apiFormat` and `apiUrl`:
+
+```js
+{
+    name: "@bitsocial/ai-moderation-challenge",
+    options: {
+        branch: "allow",
+        apiFormat: "chat-completions",
+        apiUrl: "https://provider.example/v1/chat/completions",
+        apiKeyEnv: "AI_MODERATION_PROVIDER_API_KEY",
+        model: "provider-model"
+    }
+}
+```
+
+OpenAI-compatible APIs are a practical compatibility convention, not a formal open standard. Test custom providers before enabling the challenge on live communities.
 
 ## Behavior
 
 - New comments with verdict `allow` publish normally.
 - New comments with verdict `review` are sent to pending approval.
+- New comments are also sent to pending approval if the model API is unavailable.
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
+- Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.
+- The challenge sends text, title, link URL/domain/path, flags, flairs, community address/title/description/features, and `community.rules`.
 - The challenge does not fetch linked media in v1.
+- Two branch invocations for the same publication reuse one in-process verdict promise.
 
 ## Publishing
 
