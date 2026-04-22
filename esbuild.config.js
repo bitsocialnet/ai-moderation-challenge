@@ -8,7 +8,7 @@ await esbuild.build({
     platform: "node",
     target: "node22",
     sourcemap: true,
-    external: ["@pkcprotocol/pkc-js", "@pkcprotocol/pkc-logger", "@noble/ed25519", "cborg", "uint8arrays", "zod"]
+    external: ["@pkcprotocol/pkc-js", "@pkcprotocol/pkc-logger", "zod"]
 });
 
 console.log("Build complete");

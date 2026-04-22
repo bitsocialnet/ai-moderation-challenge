@@ -72,16 +72,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@bitsocial/ai-moderation-challenge@workspace:."
   dependencies:
-    "@noble/ed25519": "npm:1.7.5"
     "@pkcprotocol/pkc-js": "npm:0.0.18"
     "@pkcprotocol/pkc-logger": "npm:0.1.0"
     "@release-it/conventional-changelog": "npm:10.0.1"
-    cborg: "npm:4.3.2"
     esbuild: "npm:0.27.2"
     prettier: "npm:3.8.1"
     release-it: "npm:19.2.3"
     typescript: "npm:6.0.2"
-    uint8arrays: "npm:5.1.0"
     vitest: "npm:4.0.16"
     zod: "npm:4.3.5"
   languageName: unknown
@@ -1894,7 +1891,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/ed25519@npm:1.7.5, @noble/ed25519@npm:^1.7.5":
+"@noble/ed25519@npm:^1.7.5":
   version: 1.7.5
   resolution: "@noble/ed25519@npm:1.7.5"
   checksum: 10c0/9ebcdf47e1cc986f270a82725ed4fdad1922fd63cca77f6bc0ba9575685db9cd73d45e66325fb62cc1d8a398010e953331b904961c1e9f18d170eebae783d5cb
@@ -3307,15 +3304,6 @@ __metadata:
   dependencies:
     nofilter: "npm:^3.0.2"
   checksum: 10c0/0cb6fb3d5e98c7af4443200ff107049f6132b5649b8a0e586940ca811e5ab5622bf3d0a36f154f43107acfd9685cc462e6eac77876ef4c060bcec96c71b90d8a
-  languageName: node
-  linkType: hard
-
-"cborg@npm:4.3.2":
-  version: 4.3.2
-  resolution: "cborg@npm:4.3.2"
-  bin:
-    cborg: lib/bin.js
-  checksum: 10c0/801a8aa17a1e033137e8d49e93bd94ef01540bb518c5c6310109e9b93b7425f3d43712ed37db2a97f5307f72fff63103cdc7a361373732e53b142bfb0d5045fc
   languageName: node
   linkType: hard
 
@@ -8490,15 +8478,6 @@ __metadata:
   dependencies:
     uint8arrays: "npm:^5.0.1"
   checksum: 10c0/d5c355c055a29c2faa1cf2d5340fa2310473602088bcc1987176a8e58d678980f6b0361c3d604fba26047df32495f199ffba360473f873e5bf4a8adb7d20820b
-  languageName: node
-  linkType: hard
-
-"uint8arrays@npm:5.1.0":
-  version: 5.1.0
-  resolution: "uint8arrays@npm:5.1.0"
-  dependencies:
-    multiformats: "npm:^13.0.0"
-  checksum: 10c0/e7587f97d03a17a608becd01b3ca52aa6db43e7ee6156c18b278c715a62f4f9e62ef2fe9432a3cd02791b6222a17578476a20b8e3ea37dd3b5ce454c6a8782a9
   languageName: node
   linkType: hard
 
