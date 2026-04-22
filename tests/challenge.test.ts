@@ -85,6 +85,7 @@ beforeAll(async () => {
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
 });
 
 describe("Bitsocial AI moderation challenge package", () => {
@@ -274,6 +275,51 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(allowResult).toEqual({ success: false, error: "network down" });
         expect(reviewResult).toEqual({ success: true });
         expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("expires failed API calls after the branch pair can reuse them", async () => {
+        vi.useFakeTimers();
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("network down"))
+            .mockResolvedValueOnce(createResponse({ verdict: "allow" }));
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const request = createCommentRequest("retry after outage");
+
+        const firstResult = await challengeFile.getChallenge({
+            challengeSettings: {
+                options: { serverUrl: "https://moderation.example/retry-outage", branch: "allow" }
+            } as CommunityChallengeSetting,
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+        const immediateResult = await challengeFile.getChallenge({
+            challengeSettings: {
+                options: { serverUrl: "https://moderation.example/retry-outage", branch: "allow" }
+            } as CommunityChallengeSetting,
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+
+        expect(firstResult).toEqual({ success: false, error: "network down" });
+        expect(immediateResult).toEqual({ success: false, error: "network down" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(30_000);
+        const retryResult = await challengeFile.getChallenge({
+            challengeSettings: {
+                options: { serverUrl: "https://moderation.example/retry-outage", branch: "allow" }
+            } as CommunityChallengeSetting,
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+
+        expect(retryResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it("rejects content edits on API outages", async () => {

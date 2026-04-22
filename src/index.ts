@@ -20,6 +20,7 @@ import Logger from "@pkcprotocol/pkc-logger";
 const log = Logger("bitsocial:community:challenge:ai-moderation");
 const LEGACY_RUNTIME_COMMUNITY_KEY = String.fromCharCode(115, 117, 98, 112, 108, 101, 98, 98, 105, 116);
 const MAX_CACHE_ENTRIES = 1000;
+const FAILED_CACHE_TTL_MS = 30_000;
 
 const optionInputs = [
     {
@@ -290,6 +291,15 @@ const evaluate = async ({
             signature
         }).then(parseEvaluateResponse)
     );
+
+    promise.catch(() => {
+        const timeout = setTimeout(() => {
+            if (evaluateCache.get(cacheKey) === promise) {
+                evaluateCache.delete(cacheKey);
+            }
+        }, FAILED_CACHE_TTL_MS);
+        timeout.unref?.();
+    });
 
     addCachedPromise(cacheKey, promise);
     return promise;
