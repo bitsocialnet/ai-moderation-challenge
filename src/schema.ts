@@ -1,9 +1,8 @@
 import { z } from "zod";
 
 export const DEFAULT_API_URL = "https://api.openai.com/v1/responses";
-export const DEFAULT_API_KEY_ENV = "AI_MODERATION_OPENAI_API_KEY";
 export const DEFAULT_MODEL = "gpt-5.4-mini";
-export const DEFAULT_PROMPT_VERSION = "bitsocial-ai-moderation-v1";
+export const DEFAULT_CACHE_PATH = "~/.bitsocial-ai-moderation-cache.json";
 export const DEFAULT_ERROR = "Rejected by Bitsocial AI moderation.";
 
 export const BranchSchema = z.enum(["allow", "review"]);
@@ -24,12 +23,12 @@ export type ModelVerdict = z.infer<typeof ModelVerdictSchema>;
 export type ParsedOptions = {
     apiUrl: string;
     apiFormat: ApiFormat;
-    apiKeyEnv: string;
+    apiKey?: string;
     model: string;
     branch: Branch;
     prompt?: string;
     promptPath?: string;
-    promptVersion: string;
+    cachePath?: string;
     error: string;
 };
 
@@ -50,8 +49,6 @@ const isHttpUrl = (value: string) => {
         return false;
     }
 };
-
-const isEnvVarName = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 
 export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) => {
     const optionDefaults = optionInputs.reduce(
@@ -99,12 +96,7 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                     const resolved = resolveOptionString(value, "apiFormat");
                     return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
                 }, ApiFormatSchema),
-                apiKeyEnv: z.preprocess(
-                    (value) => resolveOptionString(value, "apiKeyEnv"),
-                    z.string().min(1).refine(isEnvVarName, {
-                        message: "API key environment variable must be a valid environment variable name"
-                    })
-                ),
+                apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
                 model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
                 branch: z.preprocess((value) => {
                     const resolved = resolveOptionString(value, "branch");
@@ -112,7 +104,7 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 }, BranchSchema),
                 prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
                 promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
-                promptVersion: z.preprocess((value) => resolveOptionString(value, "promptVersion"), z.string().min(1)),
+                cachePath: z.preprocess((value) => resolveOptionalOptionString(value, "cachePath"), z.string().optional()),
                 error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
             })
             .refine((options) => !(options.prompt && options.promptPath), {

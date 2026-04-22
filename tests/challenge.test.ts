@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CommunityChallengeSetting } from "@pkcprotocol/pkc-js/dist/node/community/types.js";
@@ -50,10 +50,6 @@ const stubFetch = (...responses: Response[]) => {
     }
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
-};
-
-const stubApiKey = (name = "AI_MODERATION_OPENAI_API_KEY", value = "test-key") => {
-    vi.stubEnv(name, value);
 };
 
 const createCommentRequest = (content: string) =>
@@ -113,6 +109,8 @@ const settings = (options: Record<string, unknown> = {}) =>
     ({
         options: {
             apiUrl: "https://provider.example/v1/responses",
+            apiKey: "test-key",
+            cachePath: "",
             ...options
         }
     }) as CommunityChallengeSetting;
@@ -138,16 +136,18 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(challengeFile.description).toMatch(/AI/i);
         expect(options).toContain("apiUrl");
         expect(options).toContain("apiFormat");
-        expect(options).toContain("apiKeyEnv");
+        expect(options).toContain("apiKey");
         expect(options).toContain("model");
         expect(options).toContain("branch");
         expect(options).toContain("prompt");
         expect(options).toContain("promptPath");
+        expect(options).toContain("cachePath");
+        expect(options).not.toContain("apiKeyEnv");
+        expect(options).not.toContain("promptVersion");
         expect(options).not.toContain("serverUrl");
     });
 
     it("sends direct Responses API requests with community rules and extracted link metadata", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -211,7 +211,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("supports OpenAI-compatible chat-completions endpoints", async () => {
-        stubApiKey("CUSTOM_AI_KEY", "custom-key");
         const fetchMock = stubFetch(createChatModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -219,7 +218,7 @@ describe("Bitsocial AI moderation challenge package", () => {
             challengeSettings: settings({
                 apiUrl: "https://provider.example/v1/chat/completions",
                 apiFormat: "chat-completions",
-                apiKeyEnv: "CUSTOM_AI_KEY",
+                apiKey: "custom-key",
                 model: "custom-model"
             }),
             challengeRequestMessage: createReplyRequest("chat payload"),
@@ -251,7 +250,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("can read the private system prompt from a node-local file", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-"));
         const promptPath = join(tempDir, "prompt.md");
@@ -275,8 +273,55 @@ describe("Bitsocial AI moderation challenge package", () => {
         }
     });
 
+    it("persists successful verdicts in a JSON cache keyed by prompt hash", async () => {
+        const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-cache-"));
+        const cachePath = join(tempDir, "verdicts.json");
+        const prompt = "json cache private prompt";
+        const request = createCommentRequest("json cached comment");
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        try {
+            const firstResult = await challengeFile.getChallenge({
+                challengeSettings: settings({ cachePath, prompt }),
+                challengeRequestMessage: request,
+                challengeIndex: 1,
+                community
+            });
+
+            expect(firstResult).toEqual({ success: true });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            const cacheFileText = await readFile(cachePath, "utf8");
+            const cacheFile = JSON.parse(cacheFileText) as { version: number; entries: Record<string, unknown> };
+            const cacheKeys = Object.keys(cacheFile.entries);
+            expect(cacheFile.version).toBe(1);
+            expect(cacheKeys).toHaveLength(1);
+            expect(cacheKeys[0]).toMatch(/^[a-f0-9]{64}$/);
+            expect(cacheFileText).not.toContain(prompt);
+            expect(cacheFileText).not.toContain("test-key");
+
+            vi.resetModules();
+            const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
+            vi.stubGlobal("fetch", freshFetchMock);
+            const { default: FreshChallengeFileFactory } = await import("../src/index.js");
+            const freshChallengeFile = FreshChallengeFileFactory({} as CommunityChallengeSetting);
+
+            const secondResult = await freshChallengeFile.getChallenge({
+                challengeSettings: settings({ cachePath, prompt }),
+                challengeRequestMessage: request,
+                challengeIndex: 1,
+                community
+            });
+
+            expect(secondResult).toEqual({ success: true });
+            expect(freshFetchMock).not.toHaveBeenCalled();
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
     it("publishes comments on allow verdict through the allow branch", async () => {
-        stubApiKey();
         stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -291,7 +336,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("routes review comments through the review branch and reuses the cached verdict", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "review", reason: "Rule 1", matchedRuleIndexes: [0] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const request = createCommentRequest("cached review comment");
@@ -315,7 +359,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("allows content edits on allow verdict", async () => {
-        stubApiKey();
         stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -330,7 +373,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("rejects content edits on review verdict for both branches", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "review", reason: "Edit breaks rules", matchedRuleIndexes: [1] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const request = createContentEditRequest("bad edit");
@@ -357,7 +399,6 @@ describe("Bitsocial AI moderation challenge package", () => {
         ["delete-only edits", createDeleteEditRequest()],
         ["votes", createVoteRequest()]
     ])("bypasses %s without calling the API", async (_label, request) => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "review", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -380,7 +421,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("fails open to the review branch for comment API outages", async () => {
-        stubApiKey();
         const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
         vi.stubGlobal("fetch", fetchMock);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
@@ -406,7 +446,6 @@ describe("Bitsocial AI moderation challenge package", () => {
 
     it("expires failed API calls after the branch pair can reuse them", async () => {
         vi.useFakeTimers();
-        stubApiKey();
         const fetchMock = vi
             .fn()
             .mockRejectedValueOnce(new Error("network down"))
@@ -445,7 +484,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("rejects content edits on API outages", async () => {
-        stubApiKey();
         const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
         vi.stubGlobal("fetch", fetchMock);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
@@ -463,7 +501,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("treats invalid API responses as moderation outages", async () => {
-        stubApiKey();
         stubFetch(createRawResponse("not-json"));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -483,13 +520,13 @@ describe("Bitsocial AI moderation challenge package", () => {
         const request = createCommentRequest("missing key comment");
 
         const allowResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", branch: "allow" }),
+            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", apiKey: "", branch: "allow" }),
             challengeRequestMessage: request,
             challengeIndex: 1,
             community
         });
         const reviewResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", branch: "review" }),
+            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", apiKey: "", branch: "review" }),
             challengeRequestMessage: request,
             challengeIndex: 2,
             community
@@ -497,14 +534,13 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         expect(allowResult).toEqual({
             success: false,
-            error: "AI moderation API key is not configured in AI_MODERATION_OPENAI_API_KEY"
+            error: "AI moderation API key is not configured in challenge options"
         });
         expect(reviewResult).toEqual({ success: true });
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("returns safe failures for invalid options", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
@@ -521,7 +557,6 @@ describe("Bitsocial AI moderation challenge package", () => {
     });
 
     it("rejects ambiguous prompt configuration", async () => {
-        stubApiKey();
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 

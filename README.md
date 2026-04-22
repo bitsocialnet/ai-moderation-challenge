@@ -8,12 +8,6 @@ Automatic PKC challenge that evaluates Bitsocial comment content against `commun
 bitsocial challenge install @bitsocial/ai-moderation-challenge
 ```
 
-Set the API key on the machine running `bitsocial-cli`:
-
-```bash
-export AI_MODERATION_OPENAI_API_KEY=sk-...
-```
-
 ## Configuration
 
 Install this challenge twice: one `allow` branch and one `review` branch. The `review` branch uses PKC `pendingApproval` to route rule-breaking comments to the moderator queue.
@@ -24,6 +18,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
     {
         name: "@bitsocial/ai-moderation-challenge",
         options: {
+            apiKey: "sk-...",
             branch: "allow",
             promptPath: "/root/bitsocial-ai-moderation-prompt.md"
         },
@@ -32,6 +27,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
     {
         name: "@bitsocial/ai-moderation-challenge",
         options: {
+            apiKey: "sk-...",
             branch: "review",
             promptPath: "/root/bitsocial-ai-moderation-prompt.md"
         },
@@ -41,21 +37,21 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 ];
 ```
 
-Challenge options are private community-node settings in `pkc-js`, so `prompt`, `promptPath`, `apiUrl`, and `apiKeyEnv` are not copied into the public community challenge metadata.
+Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `apiUrl`, and `cachePath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain `apiKey`.
 
 ## Options
 
-| Option          | Default                                | Description                                                                          |
-| --------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
-| `apiUrl`        | `https://api.openai.com/v1/responses`  | Full OpenAI-compatible endpoint URL                                                  |
-| `apiFormat`     | `responses`                            | Request/response format: `responses` or `chat-completions`                           |
-| `apiKeyEnv`     | `AI_MODERATION_OPENAI_API_KEY`         | Environment variable containing the provider API key                                 |
-| `model`         | `gpt-5.4-mini`                         | Model name sent to the provider                                                      |
-| `branch`        | `allow`                                | Branch mode: `allow` or `review`                                                     |
-| `prompt`        | built-in prompt                        | Private inline system prompt text                                                    |
-| `promptPath`    | none                                   | Private file path for a system prompt on the community node                          |
-| `promptVersion` | `bitsocial-ai-moderation-v1`           | Version string used to separate cached verdicts after prompt changes                 |
-| `error`         | `Rejected by Bitsocial AI moderation.` | Error shown when content edits are rejected or moderation is unavailable for an edit |
+| Option       | Default                                 | Description                                                                           |
+| ------------ | --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `apiUrl`     | `https://api.openai.com/v1/responses`   | Full OpenAI-compatible endpoint URL                                                   |
+| `apiFormat`  | `responses`                             | Request/response format: `responses` or `chat-completions`                            |
+| `apiKey`     | none                                    | Private provider API key                                                              |
+| `model`      | `gpt-5.4-mini`                          | Model name sent to the provider                                                       |
+| `branch`     | `allow`                                 | Branch mode: `allow` or `review`                                                      |
+| `prompt`     | built-in prompt                         | Private inline system prompt text                                                     |
+| `promptPath` | none                                    | Private file path for a system prompt on the community node                           |
+| `cachePath`  | `~/.bitsocial-ai-moderation-cache.json` | Private JSON verdict cache path; set to an empty string to disable persistent caching |
+| `error`      | `Rejected by Bitsocial AI moderation.`  | Error shown when content edits are rejected or moderation is unavailable for an edit  |
 
 Use either `prompt` or `promptPath`, not both.
 
@@ -68,7 +64,7 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
         branch: "allow",
         apiFormat: "chat-completions",
         apiUrl: "https://provider.example/v1/chat/completions",
-        apiKeyEnv: "AI_MODERATION_PROVIDER_API_KEY",
+        apiKey: "provider-key",
         model: "provider-model"
     }
 }
@@ -87,6 +83,7 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - The challenge sends text, title, link URL/domain/path, flags, flairs, community address/title/description/features, and `community.rules`.
 - The challenge does not fetch linked media in v1.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
+- Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over model/provider config, community context, target content, and the final prompt hash. The cache does not store the raw prompt or API key.
 
 ## Publishing
 

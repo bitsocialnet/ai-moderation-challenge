@@ -1,4 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import type {
     ChallengeFileInput,
     ChallengeInput,
@@ -7,11 +10,10 @@ import type {
 } from "@pkcprotocol/pkc-js/dist/node/community/types.js";
 import Logger from "@pkcprotocol/pkc-logger";
 import {
-    DEFAULT_API_KEY_ENV,
+    DEFAULT_CACHE_PATH,
     DEFAULT_API_URL,
     DEFAULT_ERROR,
     DEFAULT_MODEL,
-    DEFAULT_PROMPT_VERSION,
     ModelVerdictSchema,
     createOptionsSchema,
     type ModelVerdict,
@@ -21,6 +23,7 @@ import {
 const log = Logger("bitsocial:community:challenge:ai-moderation");
 const LEGACY_RUNTIME_COMMUNITY_KEY = String.fromCharCode(115, 117, 98, 112, 108, 101, 98, 98, 105, 116);
 const MAX_CACHE_ENTRIES = 1000;
+const MAX_JSON_CACHE_ENTRIES = 10_000;
 const FAILED_CACHE_TTL_MS = 30_000;
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -70,11 +73,11 @@ const optionInputs = [
         placeholder: "responses"
     },
     {
-        option: "apiKeyEnv",
-        label: "API key env",
-        default: DEFAULT_API_KEY_ENV,
-        description: "Environment variable containing the provider API key",
-        placeholder: DEFAULT_API_KEY_ENV
+        option: "apiKey",
+        label: "API key",
+        default: "",
+        description: "Private provider API key",
+        placeholder: "sk-..."
     },
     {
         option: "model",
@@ -105,11 +108,11 @@ const optionInputs = [
         placeholder: "/root/bitsocial-ai-moderation-prompt.md"
     },
     {
-        option: "promptVersion",
-        label: "Prompt version",
-        default: DEFAULT_PROMPT_VERSION,
-        description: "Version string used to separate cached verdicts after prompt changes",
-        placeholder: DEFAULT_PROMPT_VERSION
+        option: "cachePath",
+        label: "Cache path",
+        default: DEFAULT_CACHE_PATH,
+        description: "Path to a private JSON verdict cache; leave empty to disable persistent caching",
+        placeholder: "~/.bitsocial-ai-moderation-cache.json"
     },
     {
         option: "error",
@@ -171,7 +174,18 @@ type ModerationTarget = {
     target: PublicationTarget;
 };
 
+type JsonCacheEntry = {
+    cachedAt: number;
+    verdict: ModelVerdict;
+};
+
+type JsonCacheFile = {
+    version: 1;
+    entries: Record<string, JsonCacheEntry>;
+};
+
 const evaluateCache = new Map<string, Promise<ModelVerdict>>();
+const jsonCacheWrites = new Map<string, Promise<void>>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
@@ -220,6 +234,8 @@ const stableValue = (value: unknown): unknown => {
 
 const stableStringify = (value: unknown) => JSON.stringify(stableValue(value));
 
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
 const addCachedPromise = (key: string, promise: Promise<ModelVerdict>) => {
     if (evaluateCache.size >= MAX_CACHE_ENTRIES) {
         const firstKey = evaluateCache.keys().next().value;
@@ -228,6 +244,98 @@ const addCachedPromise = (key: string, promise: Promise<ModelVerdict>) => {
         }
     }
     evaluateCache.set(key, promise);
+};
+
+const expandCachePath = (cachePath: string) => {
+    if (cachePath === "~") return homedir();
+    if (cachePath.startsWith("~/")) return join(homedir(), cachePath.slice(2));
+    return cachePath;
+};
+
+const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
+    if (!isRecord(value) || value.version !== 1 || !isRecord(value.entries)) {
+        return { version: 1, entries: {} };
+    }
+
+    const entries = Object.entries(value.entries).reduce<Record<string, JsonCacheEntry>>((acc, [key, entry]) => {
+        if (!isRecord(entry) || typeof entry.cachedAt !== "number") return acc;
+        const verdict = ModelVerdictSchema.safeParse(entry.verdict);
+        if (!verdict.success) return acc;
+        acc[key] = {
+            cachedAt: entry.cachedAt,
+            verdict: verdict.data
+        };
+        return acc;
+    }, {});
+
+    return { version: 1, entries };
+};
+
+const readJsonCache = async (cachePath: string): Promise<JsonCacheFile> => {
+    try {
+        const data = await readFile(expandCachePath(cachePath), "utf8");
+        return parseJsonCacheFile(JSON.parse(data));
+    } catch (error) {
+        if (isRecord(error) && error.code === "ENOENT") {
+            return { version: 1, entries: {} };
+        }
+        const message = error instanceof Error ? error.message : "Unknown JSON cache read error";
+        log.error("AI moderation JSON cache read failed: %s", message);
+        return { version: 1, entries: {} };
+    }
+};
+
+const getCachedVerdictFromJson = async (cachePath: string | undefined, cacheKey: string) => {
+    if (!cachePath) return undefined;
+    const cache = await readJsonCache(cachePath);
+    return cache.entries[cacheKey]?.verdict;
+};
+
+const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
+    const sortedEntries = Object.entries(entries).sort((a, b) => b[1].cachedAt - a[1].cachedAt);
+    return Object.fromEntries(sortedEntries.slice(0, MAX_JSON_CACHE_ENTRIES));
+};
+
+const writeJsonCache = async ({ cachePath, cacheKey, verdict }: { cachePath: string; cacheKey: string; verdict: ModelVerdict }) => {
+    const resolvedCachePath = expandCachePath(cachePath);
+    const cache = await readJsonCache(cachePath);
+    cache.entries[cacheKey] = {
+        cachedAt: Date.now(),
+        verdict
+    };
+    cache.entries = pruneJsonCacheEntries(cache.entries);
+
+    await mkdir(dirname(resolvedCachePath), { recursive: true });
+    const tempPath = `${resolvedCachePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+    await rename(tempPath, resolvedCachePath);
+};
+
+const setCachedVerdictInJson = async ({
+    cachePath,
+    cacheKey,
+    verdict
+}: {
+    cachePath: string | undefined;
+    cacheKey: string;
+    verdict: ModelVerdict;
+}) => {
+    if (!cachePath) return;
+
+    const previousWrite = jsonCacheWrites.get(cachePath) ?? Promise.resolve();
+    const nextWrite = previousWrite
+        .catch(() => undefined)
+        .then(() => writeJsonCache({ cachePath, cacheKey, verdict }))
+        .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : "Unknown JSON cache write error";
+            log.error("AI moderation JSON cache write failed: %s", message);
+        });
+
+    jsonCacheWrites.set(cachePath, nextWrite);
+    await nextWrite;
+    if (jsonCacheWrites.get(cachePath) === nextWrite) {
+        jsonCacheWrites.delete(cachePath);
+    }
 };
 
 const getCommunityContext = (community: RuntimeCommunity | undefined): CommunityContext => {
@@ -355,9 +463,9 @@ const getBranchResult = (
 };
 
 const getApiKey = (options: ParsedOptions) => {
-    const apiKey = process.env[options.apiKeyEnv];
+    const apiKey = options.apiKey;
     if (!apiKey) {
-        throw new Error(`AI moderation API key is not configured in ${options.apiKeyEnv}`);
+        throw new Error("AI moderation API key is not configured in challenge options");
     }
     return apiKey;
 };
@@ -561,31 +669,50 @@ const evaluate = async ({
 }) => {
     const systemPrompt = await loadSystemPrompt(options);
     const apiKey = getApiKey(options);
-    const cacheKey = stableStringify({
-        apiUrl: options.apiUrl,
-        apiFormat: options.apiFormat,
-        apiKeyEnv: options.apiKeyEnv,
-        model: options.model,
-        promptVersion: options.promptVersion,
-        systemPrompt,
-        target,
-        communityContext
-    });
+    const promptHash = sha256(systemPrompt);
+    const cacheKey = sha256(
+        stableStringify({
+            apiUrl: options.apiUrl,
+            apiFormat: options.apiFormat,
+            model: options.model,
+            promptHash,
+            target,
+            communityContext
+        })
+    );
     const cached = evaluateCache.get(cacheKey);
     if (cached) {
         return cached;
     }
 
+    const cachedVerdict = await getCachedVerdictFromJson(options.cachePath, cacheKey);
+    if (cachedVerdict) {
+        const cachedPromise = Promise.resolve(cachedVerdict);
+        addCachedPromise(cacheKey, cachedPromise);
+        return cachedVerdict;
+    }
+
+    const requestBody = createModelRequestBody({
+        options,
+        systemPrompt,
+        communityContext,
+        target
+    });
+
     const promise = postJson({
         options,
         apiKey,
-        body: createModelRequestBody({
-            options,
-            systemPrompt,
-            communityContext,
-            target
-        })
-    }).then(parseModelResponse);
+        body: requestBody
+    })
+        .then(parseModelResponse)
+        .then(async (verdict) => {
+            await setCachedVerdictInJson({
+                cachePath: options.cachePath,
+                cacheKey,
+                verdict
+            });
+            return verdict;
+        });
 
     promise.catch(() => {
         const timeout = setTimeout(() => {
