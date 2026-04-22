@@ -44,3 +44,27 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Delete-only edits and non-comment publication types bypass AI moderation.
 - The challenge does not fetch linked media in v1.
+
+## Publishing
+
+The package version is `0.1.0`. The first npm publish must create the package before trusted publishing can be configured:
+
+```bash
+npm publish --access public
+```
+
+After the package exists, configure npm trusted publishing:
+
+- Publisher: GitHub Actions
+- Organization: `bitsocialnet`
+- Repository: `ai-moderation-challenge`
+- Workflow filename: `publish.yml`
+- Environment: leave blank
+
+Equivalent npm CLI command:
+
+```bash
+npm trust github @bitsocial/ai-moderation-challenge --repo bitsocialnet/ai-moderation-challenge --file publish.yml
+```
+
+Future releases publish automatically when `package.json` version changes on `master`. The publish workflow skips versions that already exist on npm.

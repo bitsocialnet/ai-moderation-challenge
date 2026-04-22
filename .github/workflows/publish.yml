@@ -1,50 +1,58 @@
-name: Publish to npm
+name: Publish Package
 
 on:
+    workflow_dispatch:
     push:
-        tags:
-            - "v*"
+        branches: [master]
+        paths:
+            - package.json
 
 permissions:
-    id-token: write
     contents: read
+    id-token: write
 
 jobs:
     publish:
         runs-on: ubuntu-latest
-
         steps:
             - uses: actions/checkout@v4
 
             - uses: actions/setup-node@v4
               with:
-                  node-version: "22.14.0"
-                  registry-url: "https://registry.npmjs.org"
+                  node-version: 24
+                  registry-url: https://registry.npmjs.org
+
+            - run: npm install -g npm@latest
 
             - run: corepack enable
 
-            - run: npm install -g npm@11
-
             - run: corepack yarn install --immutable
 
-            - run: corepack yarn build
+            - run: corepack yarn format:check
 
             - run: corepack yarn type-check
 
             - run: corepack yarn test
 
-            - name: Check if version already published
-              id: check_version
+            - run: corepack yarn build
+
+            - id: package
+              shell: bash
               run: |
-                  PACKAGE_VERSION=$(node -p "require('./package.json').version")
-                  if npm view @bitsocial/ai-moderation-challenge@$PACKAGE_VERSION version 2>/dev/null; then
-                    echo "Version $PACKAGE_VERSION already exists on npm, skipping publish"
-                    echo "exists=true" >> "$GITHUB_OUTPUT"
+                  package_name="$(node -p "require('./package.json').name")"
+                  package_version="$(node -p "require('./package.json').version")"
+                  published_version="$(npm view "$package_name" version 2>/dev/null || true)"
+
+                  echo "name=$package_name" >> "$GITHUB_OUTPUT"
+                  echo "version=$package_version" >> "$GITHUB_OUTPUT"
+
+                  if [ "$published_version" = "$package_version" ]; then
+                      echo "publish=false" >> "$GITHUB_OUTPUT"
+                      echo "$package_name@$package_version is already published."
                   else
-                    echo "Version $PACKAGE_VERSION not found on npm, will publish"
-                    echo "exists=false" >> "$GITHUB_OUTPUT"
+                      echo "publish=true" >> "$GITHUB_OUTPUT"
+                      echo "$package_name@$package_version will be published."
                   fi
 
-            - name: Publish to npm
-              if: steps.check_version.outputs.exists == 'false'
-              run: npm publish --access public --provenance
+            - run: npm publish --access public
+              if: steps.package.outputs.publish == 'true'
