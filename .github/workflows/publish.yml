@@ -46,7 +46,10 @@ jobs:
                   echo "name=$package_name" >> "$GITHUB_OUTPUT"
                   echo "version=$package_version" >> "$GITHUB_OUTPUT"
 
-                  if [ "$published_version" = "$package_version" ]; then
+                  if [ -z "$published_version" ] && [ "$GITHUB_EVENT_NAME" = "push" ]; then
+                      echo "publish=false" >> "$GITHUB_OUTPUT"
+                      echo "$package_name is not published yet. Skipping push publish; create the first release manually or with workflow_dispatch after trusted publishing is configured."
+                  elif [ "$published_version" = "$package_version" ]; then
                       echo "publish=false" >> "$GITHUB_OUTPUT"
                       echo "$package_name@$package_version is already published."
                   else
