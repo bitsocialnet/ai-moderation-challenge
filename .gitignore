@@ -1,5 +1,7 @@
 node_modules
 dist
+coverage
+badges
 .yarn/install-state.gz
 .DS_Store
 .env

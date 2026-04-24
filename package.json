@@ -42,6 +42,8 @@
         "build": "yarn clean && node esbuild.config.js && tsc -p tsconfig.json --emitDeclarationOnly",
         "clean": "rm -rf dist",
         "test": "vitest run",
+        "test:coverage": "vitest run --coverage.enabled",
+        "coverage:badge": "node scripts/write-coverage-badge.mjs",
         "type-check": "tsc -p tsconfig.json --noEmit",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
@@ -54,6 +56,7 @@
     },
     "devDependencies": {
         "@release-it/conventional-changelog": "10.0.1",
+        "@vitest/coverage-v8": "4.0.16",
         "esbuild": "0.27.2",
         "prettier": "3.8.1",
         "release-it": "19.2.3",

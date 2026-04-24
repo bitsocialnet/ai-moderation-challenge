@@ -1,3 +1,5 @@
+[![Coverage](https://img.shields.io/endpoint?url=https://bitsocialnet.github.io/ai-moderation-challenge/badges/coverage.json)](https://github.com/bitsocialnet/ai-moderation-challenge/blob/master/scripts/write-coverage-badge.mjs)
+
 # @bitsocial/ai-moderation-challenge
 
 Automatic PKC challenge that evaluates Bitsocial comment content against `community.rules` with an OpenAI-compatible model endpoint. The package runs on the community node and does not require a hosted Bitsocial moderation server.
@@ -84,6 +86,12 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - The challenge does not fetch linked media in v1.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
 - Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over model/provider config, community context, target content, and the final prompt hash. The cache does not store the raw prompt or API key.
+
+## Test Coverage
+
+The coverage badge reports line coverage generated with `yarn test:coverage`. On pushes to `master`, CI writes a Shields-compatible endpoint payload and publishes it to GitHub Pages.
+
+The test suite covers the moderation-critical flow: OpenAI-compatible Responses and chat-completions requests include `community.rules`, model `review` verdicts fail the `allow` branch and pass the `review` branch used with `pendingApproval`, provider outages and malformed responses route new comments to review, and content edits are rejected on review or outage.
 
 ## Publishing
 

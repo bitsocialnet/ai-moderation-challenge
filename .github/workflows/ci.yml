@@ -5,6 +5,10 @@ on:
         branches: [master]
     push:
         branches: [master]
+    workflow_dispatch:
+
+permissions:
+    contents: read
 
 jobs:
     ci:
@@ -26,4 +30,66 @@ jobs:
 
             - run: corepack yarn test
 
+            - run: corepack yarn test:coverage
+
+            - name: Write coverage badge payload
+              if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+              run: corepack yarn coverage:badge
+
+            - name: Upload coverage badge
+              if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-badge
+                  path: badges/coverage.json
+                  if-no-files-found: error
+
             - run: corepack yarn format:check
+
+            - name: Upload coverage summary
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-summary
+                  path: coverage/coverage-summary.json
+                  if-no-files-found: warn
+
+    publish-coverage-badge:
+        name: Publish Coverage Badge
+        runs-on: ubuntu-latest
+        needs: ci
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        permissions:
+            contents: read
+            pages: write
+            id-token: write
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - name: Configure GitHub Pages
+              uses: actions/configure-pages@v5
+
+            - name: Download coverage badge
+              uses: actions/download-artifact@v4
+              with:
+                  name: coverage-badge
+                  path: ${{ runner.temp }}/coverage-badge
+
+            - name: Prepare Pages artifact
+              env:
+                  BADGE_SOURCE_PATH: ${{ runner.temp }}/coverage-badge/coverage.json
+                  PAGES_OUTPUT_PATH: ${{ runner.temp }}/github-pages
+              run: |
+                  mkdir -p "${PAGES_OUTPUT_PATH}/badges"
+                  cp "${BADGE_SOURCE_PATH}" "${PAGES_OUTPUT_PATH}/badges/coverage.json"
+                  touch "${PAGES_OUTPUT_PATH}/.nojekyll"
+
+            - name: Upload Pages artifact
+              uses: actions/upload-pages-artifact@v4
+              with:
+                  path: ${{ runner.temp }}/github-pages
+
+            - name: Deploy badge site
+              id: deployment
+              uses: actions/deploy-pages@v4

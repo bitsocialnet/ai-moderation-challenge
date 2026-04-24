@@ -72,7 +72,14 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
         return value;
     };
 
-    const resolveOptionalOptionString = (value: unknown, option: OptionName) => {
+    const resolveOptionalOptionString = (
+        value: unknown,
+        option: OptionName,
+        { emptyStringDisablesDefault = false }: { emptyStringDisablesDefault?: boolean } = {}
+    ) => {
+        if (emptyStringDisablesDefault && typeof value === "string" && value.trim() === "") {
+            return undefined;
+        }
         const resolved = resolveOptionString(value, option);
         if (typeof resolved !== "string") return resolved;
         const trimmed = resolved.trim();
@@ -104,7 +111,10 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 }, BranchSchema),
                 prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
                 promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
-                cachePath: z.preprocess((value) => resolveOptionalOptionString(value, "cachePath"), z.string().optional()),
+                cachePath: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
+                    z.string().optional()
+                ),
                 error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
             })
             .refine((options) => !(options.prompt && options.promptPath), {

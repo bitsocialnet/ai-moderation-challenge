@@ -20,6 +20,26 @@ const createModelResponse = (verdict: unknown, status = 200) =>
         }
     );
 
+const createNestedResponsesModelResponse = (verdict: unknown) =>
+    new Response(
+        JSON.stringify({
+            output: [
+                {
+                    content: [
+                        {
+                            type: "output_text",
+                            text: JSON.stringify(verdict)
+                        }
+                    ]
+                }
+            ]
+        }),
+        {
+            status: 200,
+            headers: { "content-type": "application/json" }
+        }
+    );
+
 const createChatModelResponse = (verdict: unknown) =>
     new Response(
         JSON.stringify({
@@ -208,6 +228,54 @@ describe("Bitsocial AI moderation challenge package", () => {
             }
         });
         expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("https://cdn.example.com/media/image.png?sig=1");
+    });
+
+    it("accepts nested Responses API output text", async () => {
+        const fetchMock = stubFetch(createNestedResponsesModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/nested-responses-output" }),
+            challengeRequestMessage: createCommentRequest("nested responses payload"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends a clearly rule-breaking post to the review branch for moderator queueing", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "review", reason: "No spam", matchedRuleIndexes: [0] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const request = createCommentRequest("Buy cheap pills at spam.example now.");
+        const spamCommunity = {
+            ...community,
+            rules: ["No spam", "No sexualized minors"]
+        } as unknown as LocalCommunity;
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/spam-review", branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community: spamCommunity
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/spam-review", branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community: spamCommunity
+        });
+
+        expect(allowResult).toEqual({ success: false, error: "No spam" });
+        expect(reviewResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        const body = getRequestBody(fetchMock);
+        const input = body.input as Array<{ role: string; content: string }>;
+        const userPayload = JSON.parse(input[1].content) as Record<string, Record<string, unknown>>;
+        expect(userPayload.community.rules).toEqual(["No spam", "No sexualized minors"]);
+        expect(userPayload.publication.content).toBe("Buy cheap pills at spam.example now.");
     });
 
     it("supports OpenAI-compatible chat-completions endpoints", async () => {
@@ -444,6 +512,32 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("routes comments to review when the provider returns an error response", async () => {
+        const fetchMock = stubFetch(createRawResponse(JSON.stringify({ error: "rate limited" }), 429));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const request = createCommentRequest("provider error comment");
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/provider-error", branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/provider-error", branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community
+        });
+
+        expect(allowResult).toEqual({
+            success: false,
+            error: 'AI moderation API error (429): {"error":"rate limited"}'
+        });
+        expect(reviewResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("expires failed API calls after the branch pair can reuse them", async () => {
         vi.useFakeTimers();
         const fetchMock = vi
@@ -512,6 +606,26 @@ describe("Bitsocial AI moderation challenge package", () => {
         });
 
         expect(result).toEqual({ success: true });
+    });
+
+    it.each([
+        ["missing output text", {}],
+        ["non-JSON output text", { output_text: "not-json" }],
+        ["invalid verdict JSON", { output_text: JSON.stringify({ verdict: "maybe", reason: "", matchedRuleIndexes: [] }) }]
+    ])("treats %s as a moderation outage", async (_label, body) => {
+        const fetchMock = stubFetch(createRawResponse(JSON.stringify(body)));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const slug = _label.replaceAll(" ", "-");
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: `https://provider.example/malformed-model-output-${slug}`, branch: "review" }),
+            challengeRequestMessage: createCommentRequest(`malformed model output ${_label}`),
+            challengeIndex: 2,
+            community
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it("routes comments to review when the API key is missing", async () => {
