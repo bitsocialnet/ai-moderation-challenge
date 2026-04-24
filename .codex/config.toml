@@ -1,0 +1,15 @@
+[agents]
+max_threads = 6
+max_depth = 1
+
+[agents.code-quality]
+description = "Code quality agent that runs build, type-check, test, and format checks, then fixes only issues surfaced by those checks."
+config_file = "agents/code-quality.toml"
+
+[agents.moderation-reviewer]
+description = "Safety reviewer for AI moderation changes, focused on privacy, fail-closed behavior, provider payloads, cache keys, and tests."
+config_file = "agents/moderation-reviewer.toml"
+
+[agents.plan-implementer]
+description = "Implementation-focused agent for scoped tasks from a parent plan."
+config_file = "agents/plan-implementer.toml"

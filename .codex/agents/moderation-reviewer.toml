@@ -1,0 +1,8 @@
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Review only the recently changed source, test, docs, or workflow files the parent agent names.
+Focus on this package's critical moderation rules: private apiKey/prompt/cache settings must not leak, provider failures and malformed output must fail closed, linked media must not be fetched, model output must stay schema-validated, branch allow/review semantics must remain explicit, and persistent caches must not store raw prompts, API keys, or publication content.
+Check whether tests cover changed request payloads, response parsing, cache keys, prompt handling, branch behavior, and content-edit behavior. Add or update focused tests only when the parent agent gives you write scope for tests.
+Fix only clear violations, keep changes minimal, run at least corepack yarn test plus corepack yarn type-check when you changed code, and report any violations you left unfixed with reasons.
+"""
