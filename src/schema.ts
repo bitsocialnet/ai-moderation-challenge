@@ -73,10 +73,15 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
     };
 
     const resolveOptionalOptionString = (value: unknown, option: OptionName) => {
-        const resolved = resolveOptionString(value, option);
-        if (typeof resolved !== "string") return resolved;
-        const trimmed = resolved.trim();
-        return trimmed ? trimmed : undefined;
+        if (typeof value === "string") {
+            const trimmed = value.trim();
+            return trimmed ? trimmed : undefined;
+        }
+        if (value === undefined || value === null) {
+            const defaultValue = getOptionDefault(option).trim();
+            return defaultValue ? defaultValue : undefined;
+        }
+        return value;
     };
 
     const schema: z.ZodType<ParsedOptions> = z.preprocess(
