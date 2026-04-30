@@ -114,6 +114,7 @@ docs/
 - Open PRs from task branches into `master` so review bots and CI run against the actual change.
 - Use worktrees only when parallel tasks need isolated checkouts. One active task branch per worktree.
 - If a new task is unrelated to the currently checked out branch, do not stack it on that branch. Create a new worktree from `master` and a separate short-lived task branch there.
+- Always give a new worktree a descriptive name that reflects the task (e.g. `fix-login-redirect`, not `wt1`, `tmp`, `feature`, or a numbered slug), so it can be identified at a glance in a long list of worktrees. When using `./scripts/create-task-worktree.sh`, the `<slug>` argument must be that descriptive name.
 - Prefer `./scripts/create-task-worktree.sh <feature|fix|docs|chore> <slug>` when you need a new task worktree and do not have a stronger repo-specific reason to create it manually.
 - Treat branch and worktree as different things: the branch is the change set; the worktree is the checkout where that branch is worked on.
 - After a reviewed branch is merged, prefer deleting it to keep branch drift and merge conflicts low.
