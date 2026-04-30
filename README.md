@@ -48,7 +48,7 @@ Challenge options are private community-node settings in `pkc-js`, so `apiKey`, 
 | `apiUrl`     | `https://api.openai.com/v1/responses`   | Full OpenAI-compatible endpoint URL                                                   |
 | `apiFormat`  | `responses`                             | Request/response format: `responses` or `chat-completions`                            |
 | `apiKey`     | none                                    | Private provider API key                                                              |
-| `model`      | `gpt-5.4-mini`                          | Model name sent to the provider                                                       |
+| `model`      | `gpt-5.4-nano`                          | Model name sent to the provider                                                       |
 | `branch`     | `allow`                                 | Branch mode: `allow` or `review`                                                      |
 | `prompt`     | built-in prompt                         | Private inline system prompt text                                                     |
 | `promptPath` | none                                    | Private file path for a system prompt on the community node                           |

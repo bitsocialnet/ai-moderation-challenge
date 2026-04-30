@@ -230,6 +230,23 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("https://cdn.example.com/media/image.png?sig=1");
     });
 
+    it("uses gpt-5.4-nano as the default model", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings(),
+            challengeRequestMessage: createReplyRequest("default model payload"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(getRequestBody(fetchMock)).toMatchObject({
+            model: "gpt-5.4-nano"
+        });
+    });
+
     it("accepts nested Responses API output text", async () => {
         const fetchMock = stubFetch(createNestedResponsesModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);

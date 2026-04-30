@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const DEFAULT_API_URL = "https://api.openai.com/v1/responses";
-export const DEFAULT_MODEL = "gpt-5.4-mini";
+export const DEFAULT_MODEL = "gpt-5.4-nano";
 export const DEFAULT_CACHE_PATH = "~/.bitsocial-ai-moderation-cache.json";
 export const DEFAULT_ERROR = "Rejected by Bitsocial AI moderation.";
 
