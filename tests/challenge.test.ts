@@ -247,7 +247,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         });
     });
 
-    it("sends a permissive default prompt for contextual offensive-term discussion", async () => {
+    it("sends a public fallback prompt for contextual offensive-term discussion", async () => {
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const content = "Did Trotsky invent the word racist? A 19th century source used the term NEGROPHOBIA.";
@@ -262,21 +262,10 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(result).toEqual({ success: true });
         const body = getRequestBody(fetchMock);
         const input = body.input as Array<{ role: string; content: string }>;
-        const trackedDefaultPrompt = (
-            await readFile(new URL("../prompts/bitsocial-ai-moderation-prompt.md", import.meta.url), "utf8")
-        ).trim();
-        expect(input[0].content).toBe(trackedDefaultPrompt);
-        expect(input[0].content).toContain("Return review only when the content:");
-        expect(input[0].content).toContain("Return allow when:");
-        expect(input[0].content).toContain("used historically");
-        expect(input[0].content).toContain('Review is not a "maybe" label');
-        expect(input[0].content).toContain("Treat community.features as metadata");
-        expect(input[0].content).toContain("requirePostLinkIsMedia");
-        expect(input[0].content).toContain("missing media/link evidence");
-        expect(input[0].content).toContain("repeated offensive-word spam");
-        expect(input[0].content).toContain("pornographic-site promotion");
-        expect(input[0].content).toContain("referral/affiliate link spam");
-        expect(input[0].content).toContain("Do not enforce general platform-safety preferences");
+        expect(input[0].content).toContain("public fallback prompt");
+        expect(input[0].content).toContain("Production communities should set a private promptPath");
+        expect(input[0].content).toContain("Return allow for ambiguous");
+        expect(input[0].content).toContain("Return review only for clear community-rule violations");
 
         const userPayload = JSON.parse(input[1].content) as Record<string, Record<string, unknown>>;
         expect(userPayload.publication.content).toBe(content);
