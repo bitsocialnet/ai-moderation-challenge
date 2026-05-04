@@ -41,6 +41,8 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 
 Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `apiUrl`, and `cachePath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain `apiKey`.
 
+Production operators should keep the real moderation prompt in a private node-local file referenced by `promptPath`. Do not commit production prompts to public repositories; the built-in prompt is only a public fallback.
+
 ## Options
 
 | Option       | Default                                 | Description                                                                           |
