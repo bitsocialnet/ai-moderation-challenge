@@ -269,6 +269,10 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(input[0].content).toContain("Return review only when the content:");
         expect(input[0].content).toContain("Return allow when:");
         expect(input[0].content).toContain("used historically");
+        expect(input[0].content).toContain('Review is not a "maybe" label');
+        expect(input[0].content).toContain("Treat community.features as metadata");
+        expect(input[0].content).toContain("requirePostLinkIsMedia");
+        expect(input[0].content).toContain("missing media/link evidence");
         expect(input[0].content).toContain("repeated offensive-word spam");
         expect(input[0].content).toContain("pornographic-site promotion");
         expect(input[0].content).toContain("referral/affiliate link spam");
