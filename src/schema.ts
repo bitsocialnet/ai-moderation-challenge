@@ -3,6 +3,7 @@ import { z } from "zod";
 export const DEFAULT_API_URL = "https://api.openai.com/v1/responses";
 export const DEFAULT_MODEL = "gpt-5.4-nano";
 export const DEFAULT_CACHE_PATH = "~/.bitsocial-ai-moderation-cache.json";
+export const DEFAULT_AUDIT_LOG_PATH = "~/.bitsocial-ai-moderation-audit.jsonl";
 export const DEFAULT_ERROR = "Rejected by Bitsocial AI moderation.";
 
 export const BranchSchema = z.enum(["allow", "review"]);
@@ -29,6 +30,7 @@ export type ParsedOptions = {
     prompt?: string;
     promptPath?: string;
     cachePath?: string;
+    auditLogPath?: string;
     error: string;
 };
 
@@ -113,6 +115,10 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
                 cachePath: z.preprocess(
                     (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
+                    z.string().optional()
+                ),
+                auditLogPath: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
                     z.string().optional()
                 ),
                 error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())

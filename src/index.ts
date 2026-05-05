@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
@@ -11,6 +11,7 @@ import type {
 import Logger from "@pkcprotocol/pkc-logger";
 import {
     DEFAULT_CACHE_PATH,
+    DEFAULT_AUDIT_LOG_PATH,
     DEFAULT_API_URL,
     DEFAULT_ERROR,
     DEFAULT_MODEL,
@@ -116,6 +117,13 @@ const optionInputs = [
         placeholder: "~/.bitsocial-ai-moderation-cache.json"
     },
     {
+        option: "auditLogPath",
+        label: "Audit log path",
+        default: DEFAULT_AUDIT_LOG_PATH,
+        description: "Path to a private JSONL moderation audit log; leave empty to disable audit logging",
+        placeholder: "~/.bitsocial-ai-moderation-audit.jsonl"
+    },
+    {
         option: "error",
         label: "Error",
         default: DEFAULT_ERROR,
@@ -142,7 +150,6 @@ type CommunityContext = {
     title?: string;
     description?: string;
     rules: string[];
-    features?: Record<string, unknown>;
 };
 
 type ModeratedKind = "comment" | "content-edit";
@@ -168,6 +175,12 @@ type PublicationTarget = {
     commentCid?: string;
     parentCid?: string;
     postCid?: string;
+    authorAddress?: string;
+    authorPublicKey?: string;
+    timestamp?: number;
+    signaturePublicKey?: string;
+    signatureHash?: string;
+    challengeRequestIdHash?: string;
 };
 
 type ModerationTarget = {
@@ -187,6 +200,7 @@ type JsonCacheFile = {
 
 const evaluateCache = new Map<string, Promise<ModelVerdict>>();
 const jsonCacheWrites = new Map<string, Promise<void>>();
+const auditLogWrites = new Map<string, Promise<void>>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
@@ -247,10 +261,10 @@ const addCachedPromise = (key: string, promise: Promise<ModelVerdict>) => {
     evaluateCache.set(key, promise);
 };
 
-const expandCachePath = (cachePath: string) => {
-    if (cachePath === "~") return homedir();
-    if (cachePath.startsWith("~/")) return join(homedir(), cachePath.slice(2));
-    return cachePath;
+const expandPrivatePath = (path: string) => {
+    if (path === "~") return homedir();
+    if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+    return path;
 };
 
 const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
@@ -274,7 +288,7 @@ const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
 
 const readJsonCache = async (cachePath: string): Promise<JsonCacheFile> => {
     try {
-        const data = await readFile(expandCachePath(cachePath), "utf8");
+        const data = await readFile(expandPrivatePath(cachePath), "utf8");
         return parseJsonCacheFile(JSON.parse(data));
     } catch (error) {
         if (isRecord(error) && error.code === "ENOENT") {
@@ -298,7 +312,7 @@ const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
 };
 
 const writeJsonCache = async ({ cachePath, cacheKey, verdict }: { cachePath: string; cacheKey: string; verdict: ModelVerdict }) => {
-    const resolvedCachePath = expandCachePath(cachePath);
+    const resolvedCachePath = expandPrivatePath(cachePath);
     const cache = await readJsonCache(cachePath);
     cache.entries[cacheKey] = {
         cachedAt: Date.now(),
@@ -310,6 +324,132 @@ const writeJsonCache = async ({ cachePath, cacheKey, verdict }: { cachePath: str
     const tempPath = `${resolvedCachePath}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(tempPath, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
     await rename(tempPath, resolvedCachePath);
+};
+
+const optionalHash = (value: string | undefined) => (value ? sha256(value) : undefined);
+
+const bytesToHex = (value: unknown) => {
+    if (value instanceof Uint8Array) {
+        return Array.from(value)
+            .map((byte) => byte.toString(16).padStart(2, "0"))
+            .join("");
+    }
+    return undefined;
+};
+
+const redactReason = (reason: string | undefined, target: PublicationTarget) => {
+    if (!reason) return reason;
+
+    const replacements = [
+        { value: target.content, label: "[content]" },
+        { value: target.title, label: "[title]" },
+        { value: target.link?.url, label: "[link]" }
+    ].filter((item): item is { value: string; label: string } => typeof item.value === "string" && item.value.length > 0);
+
+    return replacements.reduce((acc, { value, label }) => acc.split(value).join(label), reason);
+};
+
+const sanitizeVerdict = (verdict: ModelVerdict, target: PublicationTarget): ModelVerdict => ({
+    ...verdict,
+    reason: redactReason(verdict.reason, target)
+});
+
+const createAuditEntry = ({
+    source,
+    cacheKey,
+    options,
+    promptHash,
+    communityContext,
+    target,
+    verdict,
+    error
+}: {
+    source: "provider" | "cache";
+    cacheKey: string;
+    options: ParsedOptions;
+    promptHash: string;
+    communityContext: CommunityContext;
+    target: PublicationTarget;
+    verdict?: ModelVerdict;
+    error?: unknown;
+}) => ({
+    version: 1,
+    loggedAt: new Date().toISOString(),
+    source,
+    action: verdict ? (verdict.verdict === "allow" ? "approved" : "queued_for_review") : "moderation_error",
+    cacheKey,
+    provider: {
+        apiHost: (() => {
+            try {
+                return new URL(options.apiUrl).hostname;
+            } catch {
+                return undefined;
+            }
+        })(),
+        apiFormat: options.apiFormat,
+        model: options.model
+    },
+    promptHash,
+    community: {
+        address: communityContext.address,
+        title: communityContext.title,
+        ruleCount: communityContext.rules.length,
+        rulesHash: sha256(stableStringify(communityContext.rules))
+    },
+    publication: {
+        kind: target.kind,
+        content: target.content,
+        contentHash: optionalHash(target.content),
+        title: target.title,
+        titleHash: optionalHash(target.title),
+        linkDomain: target.link?.domain,
+        linkUrl: target.link?.url,
+        linkUrlHash: optionalHash(target.link?.url),
+        linkHtmlTagName: target.link?.htmlTagName,
+        flags: target.flags,
+        flairs: target.flairs,
+        flairHashes: target.flairs.map(sha256),
+        parentCid: target.parentCid,
+        postCid: target.postCid,
+        commentCid: target.commentCid,
+        authorAddress: target.authorAddress,
+        authorPublicKey: target.authorPublicKey,
+        timestamp: target.timestamp,
+        signaturePublicKey: target.signaturePublicKey,
+        signatureHash: target.signatureHash,
+        challengeRequestIdHash: target.challengeRequestIdHash
+    },
+    ...(verdict ? { verdict } : {}),
+    ...(error
+        ? {
+              error: error instanceof Error ? error.message : "Unknown AI moderation error"
+          }
+        : {})
+});
+
+const appendAuditLog = async ({ auditLogPath, entry }: { auditLogPath: string; entry: unknown }) => {
+    const resolvedAuditLogPath = expandPrivatePath(auditLogPath);
+    await mkdir(dirname(resolvedAuditLogPath), { recursive: true });
+    await appendFile(resolvedAuditLogPath, `${JSON.stringify(entry)}\n`, "utf8");
+};
+
+const writeAuditLogEntry = async ({ auditLogPath, entry }: { auditLogPath: string | undefined; entry: unknown }) => {
+    if (!auditLogPath) return;
+
+    const previousWrite = auditLogWrites.get(auditLogPath) ?? Promise.resolve();
+    const nextWrite = previousWrite
+        .catch(() => undefined)
+        .then(() => appendAuditLog({ auditLogPath, entry }))
+        .catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : "Unknown audit log write error";
+            log.error("AI moderation audit log write failed: %s", message);
+        });
+
+    auditLogWrites.set(auditLogPath, nextWrite);
+    await nextWrite;
+    if (auditLogWrites.get(auditLogPath) === nextWrite) {
+        auditLogWrites.delete(auditLogPath);
+    }
 };
 
 const setCachedVerdictInJson = async ({
@@ -347,13 +487,30 @@ const getCommunityContext = (community: RuntimeCommunity | undefined): Community
     if (typeof community?.address === "string") context.address = community.address;
     if (typeof community?.title === "string") context.title = community.title;
     if (typeof community?.description === "string") context.description = community.description;
-    if (isRecord(community?.features)) context.features = community.features;
 
     return context;
 };
 
 const stringValue = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
 const booleanValue = (value: unknown): boolean | undefined => (typeof value === "boolean" ? value : undefined);
+const numberValue = (value: unknown): number | undefined => (typeof value === "number" ? value : undefined);
+
+const getSignatureHash = (signature: unknown) => {
+    if (!isRecord(signature)) return undefined;
+    if (typeof signature.signature === "string") return sha256(signature.signature);
+    if (signature.signature instanceof Uint8Array) return sha256(bytesToHex(signature.signature) ?? "");
+    return undefined;
+};
+
+const getSignaturePublicKey = (signature: unknown) => (isRecord(signature) ? stringValue(signature.publicKey) : undefined);
+
+const getAuthorIdentifiers = (author: unknown) => {
+    if (!isRecord(author)) return {};
+    return {
+        authorAddress: stringValue(author.address),
+        authorPublicKey: stringValue(author.publicKey)
+    };
+};
 
 const flairText = (flairs: unknown): string[] => {
     if (!Array.isArray(flairs)) return [];
@@ -386,9 +543,11 @@ const linkTarget = ({ link, htmlTagName }: { link: unknown; htmlTagName?: unknow
 
 const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challengeRequestMessage"]): ModerationTarget | undefined => {
     const request = challengeRequestMessage as unknown as Record<string, unknown>;
+    const challengeRequestIdHash = optionalHash(bytesToHex(request.challengeRequestId));
 
     if (isRecord(request.comment)) {
         const { comment } = request;
+        const authorIdentifiers = getAuthorIdentifiers(comment.author);
         return {
             kind: "comment",
             target: {
@@ -402,7 +561,12 @@ const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challeng
                 },
                 flairs: flairText(comment.flairs),
                 parentCid: stringValue(comment.parentCid),
-                postCid: stringValue(comment.postCid)
+                postCid: stringValue(comment.postCid),
+                ...authorIdentifiers,
+                timestamp: numberValue(comment.timestamp),
+                signaturePublicKey: getSignaturePublicKey(comment.signature),
+                signatureHash: getSignatureHash(comment.signature),
+                challengeRequestIdHash
             }
         };
     }
@@ -420,7 +584,11 @@ const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challeng
                     deleted: booleanValue(commentEdit.deleted)
                 },
                 flairs: flairText(commentEdit.flairs),
-                commentCid: stringValue(commentEdit.commentCid)
+                commentCid: stringValue(commentEdit.commentCid),
+                timestamp: numberValue(commentEdit.timestamp),
+                signaturePublicKey: getSignaturePublicKey(commentEdit.signature),
+                signatureHash: getSignatureHash(commentEdit.signature),
+                challengeRequestIdHash
             }
         };
     }
@@ -569,7 +737,7 @@ const createModelRequestBody = ({
 };
 
 const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; apiKey: string; body: unknown }) => {
-    log.trace(`POST ${options.apiUrl} request body: %o`, body);
+    log.trace(`POST ${options.apiUrl} request sent`);
     const response = await fetch(options.apiUrl, {
         method: "POST",
         headers: {
@@ -581,7 +749,7 @@ const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; api
     });
 
     const responseText = await response.text().catch(() => "");
-    log.trace(`POST ${options.apiUrl} response status: ${response.status}, body: %s`, responseText);
+    log.trace(`POST ${options.apiUrl} response status: ${response.status}`);
 
     if (!response.ok) {
         const details = responseText ? `: ${responseText}` : "";
@@ -690,6 +858,18 @@ const evaluate = async ({
     if (cachedVerdict) {
         const cachedPromise = Promise.resolve(cachedVerdict);
         addCachedPromise(cacheKey, cachedPromise);
+        await writeAuditLogEntry({
+            auditLogPath: options.auditLogPath,
+            entry: createAuditEntry({
+                source: "cache",
+                cacheKey,
+                options,
+                promptHash,
+                communityContext,
+                target,
+                verdict: cachedVerdict
+            })
+        });
         return cachedVerdict;
     }
 
@@ -706,13 +886,41 @@ const evaluate = async ({
         body: requestBody
     })
         .then(parseModelResponse)
-        .then(async (verdict) => {
+        .then(async (rawVerdict) => {
+            const verdict = sanitizeVerdict(rawVerdict, target);
             await setCachedVerdictInJson({
                 cachePath: options.cachePath,
                 cacheKey,
                 verdict
             });
+            await writeAuditLogEntry({
+                auditLogPath: options.auditLogPath,
+                entry: createAuditEntry({
+                    source: "provider",
+                    cacheKey,
+                    options,
+                    promptHash,
+                    communityContext,
+                    target,
+                    verdict: rawVerdict
+                })
+            });
             return verdict;
+        })
+        .catch(async (error: unknown) => {
+            await writeAuditLogEntry({
+                auditLogPath: options.auditLogPath,
+                entry: createAuditEntry({
+                    source: "provider",
+                    cacheKey,
+                    options,
+                    promptHash,
+                    communityContext,
+                    target,
+                    error
+                })
+            });
+            throw error;
         });
 
     promise.catch(() => {

@@ -131,6 +131,7 @@ const settings = (options: Record<string, unknown> = {}) =>
             apiUrl: "https://provider.example/v1/responses",
             apiKey: "test-key",
             cachePath: "",
+            auditLogPath: "",
             ...options
         }
     }) as CommunityChallengeSetting;
@@ -162,6 +163,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(options).toContain("prompt");
         expect(options).toContain("promptPath");
         expect(options).toContain("cachePath");
+        expect(options).toContain("auditLogPath");
         expect(options).not.toContain("apiKeyEnv");
         expect(options).not.toContain("promptVersion");
         expect(options).not.toContain("serverUrl");
@@ -208,8 +210,7 @@ describe("Bitsocial AI moderation challenge package", () => {
                 address: "test.bitsocial.net",
                 title: "Test community",
                 description: "A community for tests",
-                rules: ["No spam", "No sexualized minors"],
-                features: { safeForWork: true }
+                rules: ["No spam", "No sexualized minors"]
             },
             publication: {
                 kind: "post",
@@ -227,6 +228,7 @@ describe("Bitsocial AI moderation challenge package", () => {
                 flairs: ["meta", "announcement"]
             }
         });
+        expect(userPayload.community).not.toHaveProperty("features");
         expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("https://cdn.example.com/media/image.png?sig=1");
     });
 
@@ -425,6 +427,77 @@ describe("Bitsocial AI moderation challenge package", () => {
 
             expect(secondResult).toEqual({ success: true });
             expect(freshFetchMock).not.toHaveBeenCalled();
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    it("writes private audit entries without raw prompts, API keys, or publication content", async () => {
+        const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-audit-"));
+        const cachePath = join(tempDir, "verdicts.json");
+        const auditLogPath = join(tempDir, "audit.jsonl");
+        const prompt = "audit private prompt";
+        const content = "audit raw publication content";
+        const fetchMock = stubFetch(
+            createModelResponse({
+                verdict: "review",
+                reason: `Quoted ${content} in the reason`,
+                matchedRuleIndexes: [0]
+            })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        try {
+            const result = await challengeFile.getChallenge({
+                challengeSettings: settings({ cachePath, auditLogPath, prompt, branch: "allow" }),
+                challengeRequestMessage: createCommentRequest(content),
+                challengeIndex: 1,
+                community
+            });
+
+            expect(result).toEqual({ success: false, error: "Quoted [content] in the reason" });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            const cacheFileText = await readFile(cachePath, "utf8");
+            expect(cacheFileText).not.toContain(prompt);
+            expect(cacheFileText).not.toContain("test-key");
+            expect(cacheFileText).not.toContain(content);
+            expect(cacheFileText).toContain("[content]");
+
+            const auditLogText = await readFile(auditLogPath, "utf8");
+            const entries = auditLogText
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(entries).toHaveLength(1);
+            expect(auditLogText).not.toContain(prompt);
+            expect(auditLogText).not.toContain("test-key");
+            expect(auditLogText).toContain(content);
+            expect(entries[0]).toMatchObject({
+                version: 1,
+                source: "provider",
+                action: "queued_for_review",
+                provider: {
+                    apiHost: "provider.example",
+                    apiFormat: "responses",
+                    model: "gpt-5.4-nano"
+                },
+                publication: {
+                    kind: "post",
+                    content,
+                    title: "hello",
+                    linkDomain: "cdn.example.com",
+                    linkUrl: "https://cdn.example.com/media/image.png?sig=1"
+                },
+                verdict: {
+                    verdict: "review",
+                    reason: `Quoted ${content} in the reason`,
+                    matchedRuleIndexes: [0]
+                }
+            });
+            expect(entries[0]).toHaveProperty("cacheKey");
+            expect(entries[0]).toHaveProperty("promptHash");
+            expect(entries[0]).toHaveProperty("publication.contentHash");
         } finally {
             await rm(tempDir, { recursive: true, force: true });
         }
