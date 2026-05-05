@@ -50,11 +50,11 @@
         "release": "HUSKY=0 release-it --config .release-it.json"
     },
     "dependencies": {
-        "@pkcprotocol/pkc-js": "0.0.18",
         "@pkcprotocol/pkc-logger": "0.1.0",
         "zod": "4.3.5"
     },
     "devDependencies": {
+        "@pkcprotocol/pkc-js": "0.0.18",
         "@release-it/conventional-changelog": "10.0.1",
         "@vitest/coverage-v8": "4.0.16",
         "esbuild": "0.27.2",
