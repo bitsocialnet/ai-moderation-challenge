@@ -39,23 +39,24 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 ];
 ```
 
-Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `apiUrl`, and `cachePath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain `apiKey`.
+Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `apiUrl`, `cachePath`, and `auditLogPath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain `apiKey`.
 
 Production operators should keep the real moderation prompt in a private node-local file referenced by `promptPath`. Do not commit production prompts to public repositories; the built-in prompt is only a public fallback.
 
 ## Options
 
-| Option       | Default                                 | Description                                                                           |
-| ------------ | --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `apiUrl`     | `https://api.openai.com/v1/responses`   | Full OpenAI-compatible endpoint URL                                                   |
-| `apiFormat`  | `responses`                             | Request/response format: `responses` or `chat-completions`                            |
-| `apiKey`     | none                                    | Private provider API key                                                              |
-| `model`      | `gpt-5.4-nano`                          | Model name sent to the provider                                                       |
-| `branch`     | `allow`                                 | Branch mode: `allow` or `review`                                                      |
-| `prompt`     | built-in prompt                         | Private inline system prompt text                                                     |
-| `promptPath` | none                                    | Private file path for a system prompt on the community node                           |
-| `cachePath`  | `~/.bitsocial-ai-moderation-cache.json` | Private JSON verdict cache path; set to an empty string to disable persistent caching |
-| `error`      | `Rejected by Bitsocial AI moderation.`  | Error shown when content edits are rejected or moderation is unavailable for an edit  |
+| Option         | Default                                  | Description                                                                           |
+| -------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| `apiUrl`       | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                   |
+| `apiFormat`    | `responses`                              | Request/response format: `responses` or `chat-completions`                            |
+| `apiKey`       | none                                     | Private provider API key                                                              |
+| `model`        | `gpt-5.4-nano`                           | Model name sent to the provider                                                       |
+| `branch`       | `allow`                                  | Branch mode: `allow` or `review`                                                      |
+| `prompt`       | built-in prompt                          | Private inline system prompt text                                                     |
+| `promptPath`   | none                                     | Private file path for a system prompt on the community node                           |
+| `cachePath`    | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching |
+| `auditLogPath` | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging |
+| `error`        | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit  |
 
 Use either `prompt` or `promptPath`, not both.
 
@@ -84,10 +85,25 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.
-- The challenge sends text, title, link URL/domain/path, flags, flairs, community address/title/description/features, and `community.rules`.
+- The challenge sends text, title, link URL/domain/path, flags, flairs, community address/title/description, and `community.rules`.
 - The challenge does not fetch linked media in v1.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
 - Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over model/provider config, community context, target content, and the final prompt hash. The cache does not store the raw prompt or API key.
+- Verdicts are written to a private JSONL audit log with the model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt or API key.
+
+## Moderation Audit Community
+
+The challenge writes one private JSONL audit entry per model verdict. To mirror those entries into a Bitsocial community for moderators, create an unnamed local community with a single `question` challenge, store the answer in a private node-local file, and run the publisher script on the node:
+
+```bash
+node scripts/publish-audit-log-to-community.mjs \
+  --community 12D3KooW... \
+  --audit-log ~/.bitsocial-ai-moderation-audit.jsonl \
+  --challenge-answer-file ~/.bitsocial-ai-moderation-mod-log-password \
+  --follow
+```
+
+The publisher creates a persistent local signer at `~/.bitsocial-ai-moderation-mod-log-signer.json`, stores its read offset in `~/.bitsocial-ai-moderation-mod-log-state.json`, and submits the private challenge answer when publishing. Each mod-log post includes the AI action, verdict reason, matched rule indexes, source community, publication kind, author identifiers, available CIDs, link metadata, content/title, provider/model, cache key, prompt hash, and rule hash.
 
 ## Test Coverage
 
