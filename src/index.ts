@@ -183,6 +183,8 @@ type PublicationTarget = {
     challengeRequestIdHash?: string;
 };
 
+type ModelPublicationTarget = Pick<PublicationTarget, "kind" | "content" | "title" | "link" | "flags" | "flairs">;
+
 type ModerationTarget = {
     kind: ModeratedKind;
     target: PublicationTarget;
@@ -352,6 +354,15 @@ const redactReason = (reason: string | undefined, target: PublicationTarget) => 
 const sanitizeVerdict = (verdict: ModelVerdict, target: PublicationTarget): ModelVerdict => ({
     ...verdict,
     reason: redactReason(verdict.reason, target)
+});
+
+const getModelPublicationTarget = (target: PublicationTarget): ModelPublicationTarget => ({
+    kind: target.kind,
+    content: target.content,
+    title: target.title,
+    link: target.link,
+    flags: target.flags,
+    flairs: target.flairs
 });
 
 const createAuditEntry = ({
@@ -654,7 +665,7 @@ const createResponsesRequestBody = ({
     model: string;
     systemPrompt: string;
     communityContext: CommunityContext;
-    target: PublicationTarget;
+    target: ModelPublicationTarget;
 }) => ({
     model,
     store: false,
@@ -690,7 +701,7 @@ const createChatCompletionsRequestBody = ({
     model: string;
     systemPrompt: string;
     communityContext: CommunityContext;
-    target: PublicationTarget;
+    target: ModelPublicationTarget;
 }) => ({
     model,
     messages: [
@@ -725,7 +736,7 @@ const createModelRequestBody = ({
     options: ParsedOptions;
     systemPrompt: string;
     communityContext: CommunityContext;
-    target: PublicationTarget;
+    target: ModelPublicationTarget;
 }) => {
     const props = {
         model: options.model,
@@ -839,13 +850,14 @@ const evaluate = async ({
     const systemPrompt = await loadSystemPrompt(options);
     const apiKey = getApiKey(options);
     const promptHash = sha256(systemPrompt);
+    const modelTarget = getModelPublicationTarget(target);
     const cacheKey = sha256(
         stableStringify({
             apiUrl: options.apiUrl,
             apiFormat: options.apiFormat,
             model: options.model,
             promptHash,
-            target,
+            target: modelTarget,
             communityContext
         })
     );
@@ -877,7 +889,7 @@ const evaluate = async ({
         options,
         systemPrompt,
         communityContext,
-        target
+        target: modelTarget
     });
 
     const promise = postJson({

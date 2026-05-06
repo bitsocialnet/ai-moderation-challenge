@@ -72,15 +72,27 @@ const stubFetch = (...responses: Response[]) => {
     return fetchMock;
 };
 
-const createCommentRequest = (content: string) =>
+const createCommentRequest = (content: string, overrides: { comment?: Record<string, unknown>; request?: Record<string, unknown> } = {}) =>
     ({
+        challengeRequestId: new Uint8Array([1, 2, 3, 4]),
+        ...overrides.request,
         comment: {
             content,
             title: "hello",
             link: "https://cdn.example.com/media/image.png?sig=1",
             linkHtmlTagName: "img",
             nsfw: true,
-            flairs: [{ text: "meta" }, "announcement"]
+            flairs: [{ text: "meta" }, "announcement"],
+            author: {
+                address: "author-address-1",
+                publicKey: "author-public-key-1"
+            },
+            timestamp: 1_777_966_066,
+            signature: {
+                publicKey: "signature-public-key-1",
+                signature: "signature-value-1"
+            },
+            ...overrides.comment
         }
     }) as DecryptedChallengeRequestMessageTypeWithCommunityAuthor;
 
@@ -229,6 +241,12 @@ describe("Bitsocial AI moderation challenge package", () => {
             }
         });
         expect(userPayload.community).not.toHaveProperty("features");
+        expect(userPayload.publication).not.toHaveProperty("authorAddress");
+        expect(userPayload.publication).not.toHaveProperty("authorPublicKey");
+        expect(userPayload.publication).not.toHaveProperty("timestamp");
+        expect(userPayload.publication).not.toHaveProperty("signaturePublicKey");
+        expect(userPayload.publication).not.toHaveProperty("signatureHash");
+        expect(userPayload.publication).not.toHaveProperty("challengeRequestIdHash");
         expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain("https://cdn.example.com/media/image.png?sig=1");
     });
 
@@ -332,7 +350,7 @@ describe("Bitsocial AI moderation challenge package", () => {
                 apiKey: "custom-key",
                 model: "custom-model"
             }),
-            challengeRequestMessage: createReplyRequest("chat payload"),
+            challengeRequestMessage: createCommentRequest("chat payload"),
             challengeIndex: 1,
             community
         });
@@ -358,6 +376,15 @@ describe("Bitsocial AI moderation challenge package", () => {
                 }
             }
         });
+        const body = getRequestBody(fetchMock);
+        const messages = body.messages as Array<{ role: string; content: string }>;
+        const userPayload = JSON.parse(messages[1].content) as { publication: Record<string, unknown> };
+        expect(userPayload.publication).not.toHaveProperty("authorAddress");
+        expect(userPayload.publication).not.toHaveProperty("authorPublicKey");
+        expect(userPayload.publication).not.toHaveProperty("timestamp");
+        expect(userPayload.publication).not.toHaveProperty("signaturePublicKey");
+        expect(userPayload.publication).not.toHaveProperty("signatureHash");
+        expect(userPayload.publication).not.toHaveProperty("challengeRequestIdHash");
     });
 
     it("can read the private system prompt from a node-local file", async () => {
@@ -432,6 +459,47 @@ describe("Bitsocial AI moderation challenge package", () => {
         }
     });
 
+    it("reuses verdicts when only audit identifiers differ", async () => {
+        const fetchMock = stubFetch(
+            createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }),
+            createModelResponse({ verdict: "review", reason: "second call should not run", matchedRuleIndexes: [0] })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const firstRequest = createCommentRequest("same moderation payload", {
+            comment: {
+                author: { address: "author-address-1", publicKey: "author-public-key-1" },
+                timestamp: 1_777_966_066,
+                signature: { publicKey: "signature-public-key-1", signature: "signature-value-1" }
+            },
+            request: { challengeRequestId: new Uint8Array([1, 2, 3, 4]) }
+        });
+        const secondRequest = createCommentRequest("same moderation payload", {
+            comment: {
+                author: { address: "author-address-2", publicKey: "author-public-key-2" },
+                timestamp: 1_777_966_999,
+                signature: { publicKey: "signature-public-key-2", signature: "signature-value-2" }
+            },
+            request: { challengeRequestId: new Uint8Array([9, 8, 7, 6]) }
+        });
+
+        const firstResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/audit-identifier-cache" }),
+            challengeRequestMessage: firstRequest,
+            challengeIndex: 1,
+            community
+        });
+        const secondResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/audit-identifier-cache" }),
+            challengeRequestMessage: secondRequest,
+            challengeIndex: 1,
+            community
+        });
+
+        expect(firstResult).toEqual({ success: true });
+        expect(secondResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("writes private audit entries without raw prompts, API keys, or publication content", async () => {
         const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-audit-"));
         const cachePath = join(tempDir, "verdicts.json");
@@ -487,7 +555,11 @@ describe("Bitsocial AI moderation challenge package", () => {
                     content,
                     title: "hello",
                     linkDomain: "cdn.example.com",
-                    linkUrl: "https://cdn.example.com/media/image.png?sig=1"
+                    linkUrl: "https://cdn.example.com/media/image.png?sig=1",
+                    authorAddress: "author-address-1",
+                    authorPublicKey: "author-public-key-1",
+                    timestamp: 1_777_966_066,
+                    signaturePublicKey: "signature-public-key-1"
                 },
                 verdict: {
                     verdict: "review",
@@ -498,6 +570,9 @@ describe("Bitsocial AI moderation challenge package", () => {
             expect(entries[0]).toHaveProperty("cacheKey");
             expect(entries[0]).toHaveProperty("promptHash");
             expect(entries[0]).toHaveProperty("publication.contentHash");
+            expect(entries[0]).toHaveProperty("publication.signatureHash");
+            expect(entries[0]).toHaveProperty("publication.challengeRequestIdHash");
+            expect(auditLogText).not.toContain("signature-value-1");
         } finally {
             await rm(tempDir, { recursive: true, force: true });
         }
