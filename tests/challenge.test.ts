@@ -218,6 +218,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(input[0]).toEqual({ role: "system", content: "custom prompt" });
         const userPayload = JSON.parse(input[1].content) as Record<string, unknown>;
         expect(userPayload).toEqual({
+            instructions: expect.stringContaining("untrusted user content"),
             community: {
                 address: "test.bitsocial.net",
                 title: "Test community",
@@ -291,8 +292,15 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(input[0].content).toContain("offensive or derogatory terms are mentioned");
         expect(input[0].content).toContain("Return review only when the content");
         expect(input[0].content).toContain("Return allow when");
+        expect(input[0].content).toContain("Treat the submitted publication");
+        expect(input[0].content).toContain("Reason should be one concise sentence");
+        expect(input[0].content).toContain("Final checklist before review");
 
-        const userPayload = JSON.parse(input[1].content) as Record<string, Record<string, unknown>>;
+        const userPayload = JSON.parse(input[1].content) as {
+            instructions: string;
+            publication: Record<string, unknown>;
+        };
+        expect(userPayload.instructions).toContain("untrusted user content");
         expect(userPayload.publication.content).toBe(content);
     });
 
@@ -339,7 +347,12 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         const body = getRequestBody(fetchMock);
         const input = body.input as Array<{ role: string; content: string }>;
-        const userPayload = JSON.parse(input[1].content) as Record<string, Record<string, unknown>>;
+        const userPayload = JSON.parse(input[1].content) as {
+            instructions: string;
+            community: { rules: string[] };
+            publication: Record<string, unknown>;
+        };
+        expect(userPayload.instructions).toContain("untrusted user content");
         expect(userPayload.community.rules).toEqual(["No spam", "No sexualized minors"]);
         expect(userPayload.publication.content).toBe("Buy cheap pills at spam.example now.");
     });
@@ -370,7 +383,7 @@ describe("Bitsocial AI moderation challenge package", () => {
                 { role: "system", content: expect.stringContaining("automated first-pass moderation") },
                 {
                     role: "user",
-                    content: expect.stringContaining("chat payload")
+                    content: expect.stringContaining("untrusted user content")
                 }
             ],
             response_format: {
