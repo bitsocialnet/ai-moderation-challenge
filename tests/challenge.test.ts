@@ -255,7 +255,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings(),
+            challengeSettings: settings({ prompt: "default model prompt" }),
             challengeRequestMessage: createReplyRequest("default model payload"),
             challengeIndex: 1,
             community
@@ -269,6 +269,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
     it("sends a public fallback prompt for contextual offensive-term discussion", async () => {
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const warningSpy = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const content = "Did Trotsky invent the word racist? A 19th century source used the term NEGROPHOBIA.";
 
@@ -280,12 +281,16 @@ describe("Bitsocial AI moderation challenge package", () => {
         });
 
         expect(result).toEqual({ success: true });
+        expect(warningSpy).toHaveBeenCalledWith(
+            "Using the public built-in AI moderation prompt. This prompt can be gamed by users; configure a private prompt or promptPath immediately.",
+            { code: "BITSOCIAL_AI_MODERATION_PUBLIC_PROMPT" }
+        );
         const body = getRequestBody(fetchMock);
         const input = body.input as Array<{ role: string; content: string }>;
-        expect(input[0].content).toContain("public fallback prompt");
-        expect(input[0].content).toContain("Production communities should set a private promptPath");
-        expect(input[0].content).toContain("Return allow for ambiguous");
-        expect(input[0].content).toContain("Return review only for clear community-rule violations");
+        expect(input[0].content).toContain('Review is not a "maybe" label');
+        expect(input[0].content).toContain("offensive or derogatory terms are mentioned");
+        expect(input[0].content).toContain("Return review only when the content");
+        expect(input[0].content).toContain("Return allow when");
 
         const userPayload = JSON.parse(input[1].content) as Record<string, Record<string, unknown>>;
         expect(userPayload.publication.content).toBe(content);
@@ -859,19 +864,26 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it("rejects ambiguous prompt configuration", async () => {
+    it("uses inline prompt and warns when both prompt options are configured", async () => {
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const warningSpy = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings({ prompt: "inline", promptPath: "/tmp/prompt.md" }),
+            challengeSettings: settings({ prompt: "inline", promptPath: "/tmp/nonexistent-ai-moderation-prompt.md" }),
             challengeRequestMessage: createCommentRequest("ambiguous prompt"),
             challengeIndex: 1,
             community
         });
 
-        expect(result).toHaveProperty("success", false);
-        expect((result as { error?: string }).error).toMatch(/Use prompt or promptPath/);
-        expect(fetchMock).not.toHaveBeenCalled();
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(warningSpy).toHaveBeenCalledWith(
+            "`prompt` takes priority, so ai-moderation-challenge is using `prompt` and ignoring `promptPath`.",
+            { code: "BITSOCIAL_AI_MODERATION_PROMPT_PRECEDENCE" }
+        );
+        const body = getRequestBody(fetchMock);
+        const input = body.input as Array<{ role: string; content: string }>;
+        expect(input[0]).toEqual({ role: "system", content: "inline" });
     });
 });

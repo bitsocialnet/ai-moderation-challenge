@@ -28,14 +28,37 @@ const MAX_JSON_CACHE_ENTRIES = 10_000;
 const FAILED_CACHE_TTL_MS = 30_000;
 
 const DEFAULT_SYSTEM_PROMPT = [
-    "You are an automated first-pass moderation classifier for a Bitsocial community.",
-    "Use the supplied community rules and publication metadata to return allow or review.",
-    "Return review only for clear community-rule violations or obvious spam, scams, malware, porn-site promotion, referral spam, targeted abuse, threats, or repeated flooding.",
-    "Return allow for ambiguous, merely rude, controversial, off-topic, low-context, or uncertain cases.",
-    "Do not fetch or infer hidden linked media contents.",
+    "You are the automated first-pass moderation filter for a Bitsocial community.",
+    "",
+    "Decide whether the submitted publication should be allowed or routed to moderator review.",
+    "",
+    "Return review only when the content:",
+    "",
+    "- clearly violates one or more supplied community rules;",
+    "- is obvious commercial spam, scam, phishing, malware, pornographic-site promotion, escort/adult-service promotion, referral/affiliate link spam, or repeated low-effort flooding;",
+    "- is targeted abuse, harassment, threats, or repeated offensive-word spam.",
+    "",
+    "Return allow when:",
+    "",
+    "- the case is ambiguous, lacks evidence, or would need human judgment;",
+    "- the post is merely offensive, inflammatory, political, controversial, rude, or low-quality but does not clearly cross a rule;",
+    "- offensive or derogatory terms are mentioned, quoted, discussed, used historically, or used as the subject of a question rather than as targeted abuse.",
+    "- the only concern is missing context, unclear topic fit, missing media/link evidence, uncertain media format, or inability to inspect linked media.",
+    "",
+    'Review is not a "maybe" label. If you are unsure whether content crosses a rule, return allow.',
+    "",
+    "Treat community.features as metadata, not community rules. Do not return review solely because of feature fields such as requirePostLink, requirePostLinkIsMedia, safeForWork, noSpoilers, noSpoilerReplies, pseudonymityMode, or voting settings unless the same requirement is explicitly present in community.rules or the post is obvious spam/abuse as defined above.",
+    "",
+    "Do not enforce general platform-safety preferences beyond the supplied community rules and the obvious spam/abuse categories above.",
+    "You are given link URL metadata only. Do not infer hidden media contents and do not request or fetch URLs.",
     "Use matchedRuleIndexes as zero-based indexes into the supplied community rules. Use an empty array when no rule matched.",
-    "Return only JSON matching the requested schema. Production communities should set a private promptPath instead of relying on this public fallback prompt."
+    "Return only JSON matching the requested schema."
 ].join("\n");
+
+const PROMPT_PRECEDENCE_WARNING = "`prompt` takes priority, so ai-moderation-challenge is using `prompt` and ignoring `promptPath`.";
+const PUBLIC_FALLBACK_PROMPT_WARNING =
+    "Using the public built-in AI moderation prompt. This prompt can be gamed by users; configure a private prompt or promptPath immediately.";
+const emittedWarningCodes = new Set<string>();
 
 const MODEL_RESPONSE_SCHEMA = {
     type: "object",
@@ -650,9 +673,21 @@ const getApiKey = (options: ParsedOptions) => {
     return apiKey;
 };
 
+const emitWarningOnce = (code: string, message: string) => {
+    if (emittedWarningCodes.has(code)) return;
+    emittedWarningCodes.add(code);
+    process.emitWarning(message, { code });
+};
+
 const loadSystemPrompt = async (options: ParsedOptions) => {
-    if (options.prompt) return options.prompt;
+    if (options.prompt) {
+        if (options.promptPath) {
+            emitWarningOnce("BITSOCIAL_AI_MODERATION_PROMPT_PRECEDENCE", PROMPT_PRECEDENCE_WARNING);
+        }
+        return options.prompt;
+    }
     if (options.promptPath) return readFile(options.promptPath, "utf8");
+    emitWarningOnce("BITSOCIAL_AI_MODERATION_PUBLIC_PROMPT", PUBLIC_FALLBACK_PROMPT_WARNING);
     return DEFAULT_SYSTEM_PROMPT;
 };
 
