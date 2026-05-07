@@ -90,42 +90,38 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
 
     const schema: z.ZodType<ParsedOptions> = z.preprocess(
         (value) => (value && typeof value === "object" ? value : {}),
-        z
-            .object({
-                apiUrl: z.preprocess(
-                    (value) => {
-                        const resolved = resolveOptionString(value, "apiUrl");
-                        return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
-                    },
-                    z.url().refine(isHttpUrl, {
-                        message: "API URL must use http or https"
-                    })
-                ),
-                apiFormat: z.preprocess((value) => {
-                    const resolved = resolveOptionString(value, "apiFormat");
-                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
-                }, ApiFormatSchema),
-                apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
-                model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
-                branch: z.preprocess((value) => {
-                    const resolved = resolveOptionString(value, "branch");
-                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
-                }, BranchSchema),
-                prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
-                promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
-                cachePath: z.preprocess(
-                    (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
-                    z.string().optional()
-                ),
-                auditLogPath: z.preprocess(
-                    (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
-                    z.string().optional()
-                ),
-                error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
-            })
-            .refine((options) => !(options.prompt && options.promptPath), {
-                message: "Use prompt or promptPath, not both"
-            })
+        z.object({
+            apiUrl: z.preprocess(
+                (value) => {
+                    const resolved = resolveOptionString(value, "apiUrl");
+                    return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
+                },
+                z.url().refine(isHttpUrl, {
+                    message: "API URL must use http or https"
+                })
+            ),
+            apiFormat: z.preprocess((value) => {
+                const resolved = resolveOptionString(value, "apiFormat");
+                return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+            }, ApiFormatSchema),
+            apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
+            model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
+            branch: z.preprocess((value) => {
+                const resolved = resolveOptionString(value, "branch");
+                return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+            }, BranchSchema),
+            prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
+            promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
+            cachePath: z.preprocess(
+                (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
+                z.string().optional()
+            ),
+            auditLogPath: z.preprocess(
+                (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
+                z.string().optional()
+            ),
+            error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
+        })
     );
 
     return schema;

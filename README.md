@@ -41,7 +41,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 
 Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `apiUrl`, `cachePath`, and `auditLogPath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain `apiKey`.
 
-Production operators should keep the real moderation prompt in a private node-local file referenced by `promptPath`. Do not commit production prompts to public repositories; the built-in prompt is only a public fallback.
+Production operators should keep the real moderation prompt in a private node-local file referenced by `promptPath`. Do not commit production prompts to public repositories; the built-in prompt is only a public fallback and the challenge emits a warning when it is used.
 
 ## Options
 
@@ -58,7 +58,7 @@ Production operators should keep the real moderation prompt in a private node-lo
 | `auditLogPath` | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging |
 | `error`        | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit  |
 
-Use either `prompt` or `promptPath`, not both.
+If both `prompt` and `promptPath` are set, `prompt` takes priority and the challenge emits a warning that `promptPath` is being ignored.
 
 For providers exposing the chat-completions API shape, set both `apiFormat` and `apiUrl`:
 
