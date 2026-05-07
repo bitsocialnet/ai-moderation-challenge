@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.2...v0.1.3) (2026-05-07)
+
+### Bug Fixes
+
+* **challenge:** harden moderation prompt boundaries ([a4a9455](https://github.com/bitsocialnet/ai-moderation-challenge/commit/a4a9455e9a8db9c2ad0b95241ea6b50dc807fc89))
+* **challenge:** prefer inline prompt with warnings ([67379e4](https://github.com/bitsocialnet/ai-moderation-challenge/commit/67379e41fe13a3575cd162fa94ee077bb95f9d31))
+
 ## [0.1.2](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.1...v0.1.2) (2026-05-06)
 
 ### Features
