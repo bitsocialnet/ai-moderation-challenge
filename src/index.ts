@@ -38,6 +38,7 @@ const MAX_DUPLICATE_RECENCY_SECONDS = 30 * 24 * 60 * 60;
 const PROMPT_URL_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROMPT_URL_FETCH_TIMEOUT_MS = 5_000;
 const MAX_PROMPT_URL_BYTES = 64 * 1024;
+const MAX_REMOTE_PROMPT_CACHE_ENTRIES = 256;
 
 const DEFAULT_SYSTEM_PROMPT = [
     "You are the automated first-pass moderation filter for a Bitsocial community.",
@@ -904,6 +905,16 @@ const getRemotePromptCacheKey = (options: ParsedOptions) =>
         })
     );
 
+const setRemotePromptCache = (cacheKey: string, prompt: string) => {
+    if (!remotePromptCache.has(cacheKey) && remotePromptCache.size >= MAX_REMOTE_PROMPT_CACHE_ENTRIES) {
+        const firstKey = remotePromptCache.keys().next().value;
+        if (typeof firstKey === "string") {
+            remotePromptCache.delete(firstKey);
+        }
+    }
+    remotePromptCache.set(cacheKey, { prompt, fetchedAt: Date.now() });
+};
+
 const readResponseTextWithLimit = async (response: Response, maxBytes: number) => {
     const contentLength = response.headers.get("content-length");
     if (contentLength && Number(contentLength) > maxBytes) {
@@ -1013,7 +1024,7 @@ const loadRemotePrompt = async (options: ParsedOptions) => {
 
     const promptFetch = fetchRemotePrompt(options)
         .then((prompt) => {
-            remotePromptCache.set(cacheKey, { prompt, fetchedAt: Date.now() });
+            setRemotePromptCache(cacheKey, prompt);
             return prompt;
         })
         .catch((error: unknown) => {

@@ -582,6 +582,66 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("fails closed when a remote prompt fetch times out before any cache exists", async () => {
+        const abortError = new Error("aborted");
+        abortError.name = "AbortError";
+        const fetchMock = vi.fn().mockRejectedValue(abortError);
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                promptUrl: "https://prompt.example.com/v1/prompts/slow-ai-moderation.md",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("remote prompt timeout"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({ success: false, error: "Remote AI moderation prompt fetch timed out" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when a remote prompt advertises an oversized body", async () => {
+        const fetchMock = stubFetch(createPromptResponse("too large", 200, { "content-length": "65537" }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                promptUrl: "https://prompt.example.com/v1/prompts/oversized-ai-moderation.md",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("remote prompt oversized"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({ success: false, error: "Remote AI moderation prompt exceeds 65536 bytes" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when a remote prompt uses a disallowed content type", async () => {
+        const fetchMock = stubFetch(createPromptResponse('{"prompt":"not text"}', 200, { "content-type": "application/json" }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                promptUrl: "https://prompt.example.com/v1/prompts/json-ai-moderation.md",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("remote prompt content type"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({
+            success: false,
+            error: "Remote AI moderation prompt must be served as plain text or Markdown"
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("does not follow remote prompt redirects with private prompt auth", async () => {
         const fetchMock = stubFetch(
             createPromptResponse("redirect", 302, {
