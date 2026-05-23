@@ -1031,6 +1031,7 @@ const loadRemotePrompt = async (options: ParsedOptions) => {
             if (cached) {
                 const message = error instanceof Error ? error.message : "Unknown remote prompt fetch error";
                 log.error("AI moderation remote prompt fetch failed; using cached prompt: %s", message);
+                setRemotePromptCache(cacheKey, cached.prompt);
                 return cached.prompt;
             }
             throw error;

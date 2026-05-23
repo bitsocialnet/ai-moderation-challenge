@@ -532,6 +532,7 @@ describe("Bitsocial AI moderation challenge package", () => {
             .mockResolvedValueOnce(createPromptResponse("stale-but-usable prompt"))
             .mockResolvedValueOnce(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }))
             .mockRejectedValueOnce(new Error("prompt host unavailable"))
+            .mockResolvedValueOnce(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }))
             .mockResolvedValueOnce(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         vi.stubGlobal("fetch", fetchMock);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
@@ -550,18 +551,29 @@ describe("Bitsocial AI moderation challenge package", () => {
             challengeIndex: 1,
             community
         });
+        const thirdResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ promptUrl }),
+            challengeRequestMessage: createCommentRequest("remote stale cache payload 3"),
+            challengeIndex: 1,
+            community
+        });
 
         expect(firstResult).toEqual({ success: true });
         expect(secondResult).toEqual({ success: true });
+        expect(thirdResult).toEqual({ success: true });
         expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
             promptUrl,
             "https://provider.example/v1/responses",
             promptUrl,
+            "https://provider.example/v1/responses",
             "https://provider.example/v1/responses"
         ]);
         const secondBody = getRequestBody(fetchMock, 3);
         const secondInput = secondBody.input as Array<{ role: string; content: string }>;
         expect(secondInput[0].content).toContain("stale-but-usable prompt");
+        const thirdBody = getRequestBody(fetchMock, 4);
+        const thirdInput = thirdBody.input as Array<{ role: string; content: string }>;
+        expect(thirdInput[0].content).toContain("stale-but-usable prompt");
     });
 
     it("fails closed when a remote prompt cannot be fetched before any cache exists", async () => {
