@@ -582,6 +582,37 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("does not follow remote prompt redirects with private prompt auth", async () => {
+        const fetchMock = stubFetch(
+            createPromptResponse("redirect", 302, {
+                location: "https://other.example.com/v1/prompts/ai-moderation.md"
+            })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                promptUrl: "https://prompt.example.com/v1/prompts/redirect-ai-moderation.md",
+                promptBearerToken: "prompt-secret-token",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("remote prompt redirect"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({ success: false, error: "Remote AI moderation prompt fetch failed (302)" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [promptUrl, promptInit] = getFetchCall(fetchMock);
+        expect(promptUrl).toBe("https://prompt.example.com/v1/prompts/redirect-ai-moderation.md");
+        expect(promptInit).toMatchObject({
+            redirect: "manual",
+            headers: {
+                authorization: "Bearer prompt-secret-token"
+            }
+        });
+    });
+
     it("sends activity-relative recent top-level posts for duplicate-thread checks", async () => {
         const fetchMock = stubFetch(
             createModelResponse({

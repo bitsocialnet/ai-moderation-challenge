@@ -94,7 +94,7 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - The challenge sends text, title, link URL/domain/path, flags, flairs, community address/title/description, `community.rules`, and a bounded activity-relative list of recent top-level posts for duplicate-thread checks when the local community database is available.
 - The model payload explicitly labels publication fields as untrusted user content, not instructions.
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.
-- Remote prompts are fetched with a 5 second timeout, capped at 64 KiB, cached in memory for 5 minutes, and reused from the last in-memory copy if a refresh fails. If the first remote prompt fetch fails, moderation fails closed for the allow branch.
+- Remote prompts are fetched without following redirects, with a 5 second timeout, capped at 64 KiB, cached in memory for 5 minutes, and reused from the last in-memory copy if a refresh fails. If the first remote prompt fetch fails, moderation fails closed for the allow branch.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
 - Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API key.
 - Verdicts are written to a private JSONL audit log with the model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt, API key, prompt URL, or prompt bearer token.

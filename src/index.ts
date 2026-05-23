@@ -974,7 +974,7 @@ const fetchRemotePrompt = async (options: ParsedOptions) => {
         const response = await fetch(options.promptUrl, {
             method: "GET",
             headers,
-            redirect: "follow",
+            redirect: "manual",
             signal: controller.signal
         });
 
