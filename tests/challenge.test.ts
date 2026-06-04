@@ -896,7 +896,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         );
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const targetTimestamp = 1_780_000_000;
-        const duplicateLink = "https://example.com/repeated-fashion-photo.jpg";
+        const duplicateLink = `https://x.io/${"a".repeat(600)}`;
         const duplicateRows = [
             {
                 title: "There is nothing wrong with wearing socks and sandals",

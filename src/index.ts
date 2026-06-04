@@ -284,6 +284,8 @@ type DuplicatePostContext = {
     title?: string;
     content?: string;
     link?: LinkTarget;
+    linkUrlHash?: string;
+    linkPathHash?: string;
     timestamp: number;
     ageSeconds: number;
 };
@@ -792,6 +794,8 @@ const toDuplicatePostContext = (row: DuplicatePostRow, targetTimestamp: number):
             url: truncate(link.url, MAX_DUPLICATE_CONTEXT_URL_CHARS),
             ...(link.path ? { path: truncate(link.path, MAX_DUPLICATE_CONTEXT_PATH_CHARS) } : {})
         };
+        post.linkUrlHash = optionalHash(link.url);
+        post.linkPathHash = optionalHash(link.path);
     }
 
     return post;
@@ -1364,6 +1368,8 @@ const getEvidenceTokens = (...values: Array<string | undefined>) =>
 const hasSameLink = (target: PublicationTarget, recentPost: DuplicatePostContext) => {
     if (!target.link?.url || !recentPost.link?.url) return false;
     if (target.link.url === recentPost.link.url) return true;
+    if (recentPost.linkUrlHash && optionalHash(target.link.url) === recentPost.linkUrlHash) return true;
+    if (target.link.path && recentPost.linkPathHash && optionalHash(target.link.path) === recentPost.linkPathHash) return true;
     return Boolean(
         target.link.domain && target.link.path && target.link.domain === recentPost.link.domain && target.link.path === recentPost.link.path
     );
