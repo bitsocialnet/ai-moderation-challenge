@@ -1524,6 +1524,9 @@ const evaluate = async ({
                     communityContext: ruleOnlyCommunityContext,
                     target: modelTarget
                 });
+                if (isUnsupportedDuplicateReview(finalRawVerdict, target, ruleOnlyCommunityContext)) {
+                    throw new Error("AI moderation duplicate review lacked recent-post evidence");
+                }
             } else {
                 finalRawVerdict = normalizeDuplicateReview(rawVerdict, target, communityContext);
             }

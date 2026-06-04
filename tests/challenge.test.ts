@@ -937,6 +937,53 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("fails closed when a duplicate-context retry still returns an unsupported duplicate review", async () => {
+        const fetchMock = stubFetch(
+            createModelResponse({
+                verdict: "review",
+                reason: "it appears to duplicate the recent thread There is nothing wrong with wearing socks and sandals",
+                matchedRuleIndexes: []
+            }),
+            createModelResponse({
+                verdict: "review",
+                reason: "it appears to duplicate a recent thread",
+                matchedRuleIndexes: []
+            })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_000;
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/retry-unsupported-duplicate-review",
+                prompt: "private prompt",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("MicroStrategy Bitcoin loss", {
+                comment: {
+                    title: "MicroStrategy faces a Bitcoin loss",
+                    timestamp: targetTimestamp,
+                    link: "https://pbs.twimg.com/media/example.jpg",
+                    linkHtmlTagName: "img"
+                }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows([
+                {
+                    title: "There is nothing wrong with wearing socks and sandals",
+                    timestamp: targetTimestamp - 60,
+                    totalTopLevelPosts: 8
+                }
+            ])
+        });
+
+        expect(result).toEqual({
+            success: false,
+            error: "AI moderation duplicate review lacked recent-post evidence"
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it("persists successful verdicts in a JSON cache keyed by prompt hash", async () => {
         const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-cache-"));
         const cachePath = join(tempDir, "verdicts.json");
