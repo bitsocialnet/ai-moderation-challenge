@@ -1387,18 +1387,44 @@ const hasDuplicateEvidence = (target: PublicationTarget, recentPost: DuplicatePo
     return sharedTokens >= MIN_DUPLICATE_SHARED_TOKENS;
 };
 
-const isUnsupportedDuplicateReview = (verdict: ModelVerdict, target: PublicationTarget, communityContext: CommunityContext) => {
+const isDuplicateReview = (verdict: ModelVerdict) => {
     if (verdict.verdict !== "review") return false;
     if (verdict.matchedRuleIndexes?.length) return false;
-    if (!DUPLICATE_REASON_PATTERN.test(verdict.reason ?? "")) return false;
+    return DUPLICATE_REASON_PATTERN.test(verdict.reason ?? "");
+};
 
+const getDuplicateEvidencePosts = (target: PublicationTarget, communityContext: CommunityContext) => {
     const recentPosts = communityContext.duplicateCheck?.recentTopLevelPosts;
-    if (!recentPosts?.length) return true;
+    if (!recentPosts?.length) return [];
+    return recentPosts.filter((recentPost) => hasDuplicateEvidence(target, recentPost));
+};
 
+const getClaimedDuplicatePosts = (verdict: ModelVerdict, communityContext: CommunityContext) => {
+    const recentPosts = communityContext.duplicateCheck?.recentTopLevelPosts;
+    if (!recentPosts?.length) return [];
     const reasonTokens = getEvidenceTokens(verdict.reason);
-    const claimedPosts = recentPosts.filter((recentPost) => reasonClaimsRecentPost(reasonTokens, recentPost));
-    const candidatePosts = claimedPosts.length ? claimedPosts : recentPosts;
-    return !candidatePosts.some((recentPost) => hasDuplicateEvidence(target, recentPost));
+    return recentPosts.filter((recentPost) => reasonClaimsRecentPost(reasonTokens, recentPost));
+};
+
+const normalizeDuplicateReview = (verdict: ModelVerdict, target: PublicationTarget, communityContext: CommunityContext) => {
+    if (!isDuplicateReview(verdict)) return verdict;
+
+    const evidencePosts = getDuplicateEvidencePosts(target, communityContext);
+    if (evidencePosts.length === 0) return verdict;
+
+    const claimedPosts = getClaimedDuplicatePosts(verdict, communityContext);
+    if (!claimedPosts.length || claimedPosts.some((recentPost) => evidencePosts.includes(recentPost))) return verdict;
+
+    const supportedTitle = evidencePosts[0]?.title?.trim();
+    return {
+        ...verdict,
+        reason: supportedTitle ? `it appears to duplicate the recent thread ${supportedTitle}` : "it appears to duplicate a recent thread"
+    };
+};
+
+const isUnsupportedDuplicateReview = (verdict: ModelVerdict, target: PublicationTarget, communityContext: CommunityContext) => {
+    if (!isDuplicateReview(verdict)) return false;
+    return getDuplicateEvidencePosts(target, communityContext).length === 0;
 };
 
 const withoutDuplicateCheck = (communityContext: CommunityContext): CommunityContext => {
@@ -1498,6 +1524,8 @@ const evaluate = async ({
                     communityContext: ruleOnlyCommunityContext,
                     target: modelTarget
                 });
+            } else {
+                finalRawVerdict = normalizeDuplicateReview(rawVerdict, target, communityContext);
             }
             const verdict = sanitizeVerdict(finalRawVerdict, target);
             await setCachedVerdictInJson({

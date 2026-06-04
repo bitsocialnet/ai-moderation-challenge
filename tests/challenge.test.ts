@@ -886,6 +886,57 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(JSON.parse(retryInput[1].content)).not.toHaveProperty("community.duplicateCheck");
     });
 
+    it("keeps duplicate reviews when a mis-cited thread hides supported duplicate evidence", async () => {
+        const fetchMock = stubFetch(
+            createModelResponse({
+                verdict: "review",
+                reason: "it appears to duplicate the recent thread There is nothing wrong with wearing socks and sandals",
+                matchedRuleIndexes: []
+            })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_000;
+        const duplicateLink = "https://example.com/repeated-fashion-photo.jpg";
+        const duplicateRows = [
+            {
+                title: "There is nothing wrong with wearing socks and sandals",
+                timestamp: targetTimestamp - 60,
+                totalTopLevelPosts: 8
+            },
+            {
+                title: "Repeated runway image",
+                link: duplicateLink,
+                linkHtmlTagName: "img",
+                timestamp: targetTimestamp - 120,
+                totalTopLevelPosts: 8
+            }
+        ];
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/miscited-duplicate-review",
+                prompt: "private prompt",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("new title for same linked item", {
+                comment: {
+                    title: "Same runway image again",
+                    timestamp: targetTimestamp,
+                    link: duplicateLink,
+                    linkHtmlTagName: "img"
+                }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows(duplicateRows)
+        });
+
+        expect(result).toEqual({
+            success: false,
+            error: "it appears to duplicate the recent thread Repeated runway image"
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("persists successful verdicts in a JSON cache keyed by prompt hash", async () => {
         const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-cache-"));
         const cachePath = join(tempDir, "verdicts.json");
