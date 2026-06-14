@@ -531,6 +531,40 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("preserves bracketed rule references already present in model review reasons", async () => {
+        const fetchMock = stubFetch(
+            createModelResponse({
+                verdict: "review",
+                reason: "The post appears unrelated to animals or nature as defined by [board topic rule #1](/rules#an)",
+                matchedRuleIndexes: [0]
+            })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const animalsCommunity = {
+            ...community,
+            title: "/an/ - Animals & Nature",
+            rules: ["Posts must be related to animals or nature"]
+        } as unknown as LocalCommunity;
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: pendingApprovalSettings({
+                apiUrl: "https://provider.example/existing-animal-rule-link",
+                branch: "review"
+            }),
+            challengeRequestMessage: createCommentRequest("Check out this unrelated laptop deal."),
+            challengeIndex: 1,
+            community: animalsCommunity
+        });
+
+        expect(result).toEqual({
+            success: true,
+            commentUpdate: {
+                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the post appears unrelated to animals or nature as defined by [board topic rule #1](/rules#an)"
+            }
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("redacts publication text before adding the review reason to pending approval metadata", async () => {
         const content = "pending approval text should not be echoed";
         const fetchMock = stubFetch(

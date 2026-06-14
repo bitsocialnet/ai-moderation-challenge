@@ -526,8 +526,15 @@ const getReferencedRuleNumbers = (reason: string, communityContext: CommunityCon
     return ruleNumbers;
 };
 
-const isMarkdownLinkedRuleReference = (value: string, start: number, end: number) =>
-    value[start - 1] === "[" && value.slice(end, end + 2) === "](";
+const isInsideSquareBrackets = (value: string, start: number, end: number) => {
+    const previousOpen = value.lastIndexOf("[", start);
+    const previousClose = value.lastIndexOf("]", start);
+    if (previousOpen <= previousClose) return false;
+
+    const nextClose = value.indexOf("]", end);
+    const nextOpen = value.indexOf("[", end);
+    return nextClose !== -1 && (nextOpen === -1 || nextClose < nextOpen);
+};
 
 const linkReasonRuleReferences = (reason: string, communityContext: CommunityContext) => {
     const rulesPath = getCommunityRulesPath(communityContext);
@@ -541,7 +548,7 @@ const linkReasonRuleReferences = (reason: string, communityContext: CommunityCon
         const ruleNumber = Number(match[1]);
         const start = match.index;
         const end = start + matchedText.length;
-        if (!isKnownRuleNumber(ruleNumber, communityContext) || isMarkdownLinkedRuleReference(reason, start, end)) continue;
+        if (!isKnownRuleNumber(ruleNumber, communityContext) || isInsideSquareBrackets(reason, start, end)) continue;
 
         linkedReason += reason.slice(lastIndex, start);
         linkedReason += `[${matchedText}](${rulesPath})`;
