@@ -61,7 +61,7 @@
         "esbuild": "0.27.2",
         "prettier": "3.8.1",
         "release-it": "19.2.3",
-        "typescript": "6.0.2",
+        "typescript": "7.0.2",
         "vitest": "4.0.16"
     },
     "resolutions": {
@@ -79,5 +79,5 @@
         "ws@npm:^8.5.0": "npm:8.20.1",
         "ws@npm:^8.18.3": "npm:8.20.1"
     },
-    "packageManager": "yarn@4.13.0"
+    "packageManager": "yarn@4.17.1"
 }
