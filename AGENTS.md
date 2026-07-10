@@ -163,7 +163,7 @@ docs/
 - Keep equivalent workflow files aligned across all toolchains when their directories contain the same skill, hook, or agent.
 - Keep shared behavior equivalent while preserving harness-specific models, config formats, hook entry points, and tool invocation syntax.
 - Do not configure `.claude` agents to use `composer-2`; that model is Cursor-only.
-- Standardize `.codex/agents/*.toml` on `gpt-5.4` unless the user explicitly requests a different model.
+- Do not use undocumented model aliases such as `latest` in Codex custom-agent TOML files. Omit both `model` and `model_reasoning_effort` so custom agents inherit the current parent settings.
 - When changing shared agent behavior, update the relevant files in `.codex/skills/`, `.cursor/skills/`, `.claude/skills/`, `.codex/agents/`, `.cursor/agents/`, `.claude/agents/`, `.codex/hooks/`, `.cursor/hooks/`, `.claude/hooks/`, and their hook or config entry points as needed.
 - Review `.codex/config.toml`, `.cursor/hooks.json`, and `.claude/hooks.json` before changing agent orchestration or hook behavior, because they are the entry points contributors will actually load.
 - Directory-specific auto-loaded rules live under `src/AGENTS.md`, `tests/AGENTS.md`, and `scripts/AGENTS.md`; read them before editing files in those trees.

@@ -343,7 +343,7 @@ docs/
 - Keep equivalent workflow files aligned across all toolchains when their directories contain the same skill, hook, or agent.
 - Keep shared behavior equivalent while preserving harness-specific models, config formats, hook entry points, and tool invocation syntax.
 - Do not configure `.claude` agents to use `composer-2`; that model is Cursor-only.
-- Standardize `.codex/agents/*.toml` on `gpt-5.4` unless the user explicitly requests a different model.
+- Do not use undocumented model aliases such as `latest` in Codex custom-agent TOML files. Omit both `model` and `model_reasoning_effort` so custom agents inherit the current parent settings.
 - When changing shared agent behavior, update the relevant files in `.codex/skills/`, `.cursor/skills/`, `.claude/skills/`, `.codex/agents/`, `.cursor/agents/`, `.claude/agents/`, `.codex/hooks/`, `.cursor/hooks/`, `.claude/hooks/`, and their hook or config entry points as needed.
 - Review `.codex/config.toml`, `.cursor/hooks.json`, and `.claude/hooks.json` before changing agent orchestration or hook behavior, because they are the entry points contributors will actually load.
 - Directory-specific auto-loaded rules live under `src/AGENTS.md`, `tests/AGENTS.md`, and `scripts/AGENTS.md`; read them before editing files in those trees.
@@ -657,6 +657,12 @@ Source: https://github.com/bitsocialnet/ai-moderation-challenge/blob/master/CHAN
 
 ```markdown
 # Changelog
+
+## [0.1.10](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.9...v0.1.10) (2026-07-06)
+
+### Bug Fixes
+
+- **challenge:** relax reply moderation prompts ([b927789](https://github.com/bitsocialnet/ai-moderation-challenge/commit/b9277893aac1ae609d0c3437c44efee746221165))
 
 ## [0.1.9](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.8...v0.1.9) (2026-06-14)
 
