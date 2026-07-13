@@ -235,7 +235,7 @@ Agents may use compiled context to navigate quickly, but must verify against sou
 | API request/response parsing, prompt handling, cache keying, or secret handling changed                                                            | Add or update Vitest coverage and use the moderation review checklist in `.codex/agents/moderation-reviewer.toml` or the equivalent Cursor/Claude agent                                           |
 | `README.md`, package version, or release workflow changed                                                                                          | Verify docs against the code and use the `release` or `release-description` skill when preparing a release                                                                                        |
 | Public docs or AI context changed (`README.md`, `AGENTS.md`, `src/AGENTS.md`, `tests/AGENTS.md`, docs pages, or `scripts/generate-llms-files.mjs`) | Run `corepack yarn llms:generate`; inspect and commit any resulting changes to `llms*.txt` so LLM indexes stay current                                                                            |
-| Bug report in a specific file/line                                                                                                                 | Start with a git history scan from `docs/agent-playbooks/bug-investigation.md` before editing                                                                                                     |
+| Bug report                                                                                                                                         | Apply the Bug Investigation Rules below before editing                                                                                                                                            |
 | Long-running task spans multiple sessions, handoffs, or spawned agents                                                                             | Use `docs/agent-playbooks/long-running-agent-workflow.md`, keep a machine-readable feature list plus a progress log, and run `./scripts/agent-init.sh --smoke` before starting a fresh task slice |
 | New reviewable feature/fix started while on `master`                                                                                               | Create a short-lived `codex/feature/*`, `codex/fix/*`, `codex/docs/*`, or `codex/chore/*` branch from `master` before editing unless the user explicitly asks to work on `master`                 |
 | New unrelated task started while another task branch is already checked out or being worked on by another agent                                    | Create a separate worktree from `master`, create a new short-lived task branch there, and keep each agent on its own worktree/branch/PR                                                           |
@@ -317,6 +317,9 @@ docs/
 
 ### Bug Investigation Rules
 
+- A bug fix requires either a reproduction of the reported behavior or conclusive source/runtime evidence that identifies both the defect and the correct fix with equivalent certainty.
+- If the bug cannot be reproduced and the evidence is not conclusive, do not guess or make speculative changes. Report what was checked, say that the bug was not reproduced, and ask for the missing reproduction details when useful.
+- When proceeding from conclusive evidence without a reproduction, explain why the evidence is sufficient and add a targeted regression test when practical.
 - For bug reports tied to a specific file/line, check relevant git history before any fix.
 - Minimum sequence: `git log --oneline` or `git blame` first, then scoped `git show` for relevant commits.
 - Full workflow: `docs/agent-playbooks/bug-investigation.md`.
