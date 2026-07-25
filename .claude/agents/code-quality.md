@@ -1,6 +1,5 @@
 ---
 name: code-quality
-model: sonnet
 description: Code quality specialist that runs build, type-check, test, and format checks, then fixes any errors it finds.
 ---
 

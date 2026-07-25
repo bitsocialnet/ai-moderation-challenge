@@ -1,6 +1,5 @@
 ---
 name: moderation-reviewer
-model: sonnet
 description: Reviews AI moderation changes for privacy, fail-closed behavior, provider payloads, cache keys, branch semantics, and tests.
 ---
 

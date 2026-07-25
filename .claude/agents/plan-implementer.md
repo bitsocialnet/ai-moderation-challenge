@@ -1,6 +1,5 @@
 ---
 name: plan-implementer
-model: sonnet
 description: Implements assigned tasks from a plan. Receives specific tasks from the parent agent, implements them sequentially, verifies with focused checks, and reports back.
 ---
 
