@@ -143,13 +143,13 @@ const community = {
     features: { safeForWork: true }
 } as unknown as LocalCommunity;
 
-const createCommunityWithDuplicateRows = (rows: unknown[]) =>
+const createCommunityWithDuplicateRows = (rows: unknown[], activeMediaRows: unknown[] = rows) =>
     ({
         ...community,
         _dbHandler: {
             _db: {
-                prepare: vi.fn(() => ({
-                    all: vi.fn(() => rows)
+                prepare: vi.fn((sql: string) => ({
+                    all: vi.fn(() => (sql.includes("COUNT(*) OVER()") ? rows : activeMediaRows))
                 }))
             }
         }
@@ -990,7 +990,8 @@ describe("Bitsocial AI moderation challenge package", () => {
                 }
             ),
             challengeIndex: 1,
-            community: createCommunityWithDuplicateRows(duplicateRows)
+            // Keep this test focused on model-evidence normalization; exact active-media rejection is covered separately.
+            community: createCommunityWithDuplicateRows(duplicateRows, [])
         });
 
         expect(result).toEqual({ success: false, error: "it appears to duplicate the recent thread PISS PLANET FOUND" });
@@ -1029,6 +1030,201 @@ describe("Bitsocial AI moderation challenge package", () => {
             ])
         );
         expect(JSON.stringify(userPayload.community.duplicateCheck)).not.toContain("author");
+    });
+
+    it("hard-rejects an exact recent media URL in both branches without calling the provider", async () => {
+        const fetchMock = stubFetch();
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_000;
+        const request = createCommentRequest("same image, different post text", {
+            comment: {
+                link: "http://FILES.CATBOX.MOE:80/98w833.png#preview",
+                linkHtmlTagName: "IMG",
+                timestamp: targetTimestamp
+            }
+        });
+        const duplicateCommunity = createCommunityWithDuplicateRows([
+            {
+                title: "Earlier thread",
+                link: "https://files.catbox.moe/98w833.png",
+                linkHtmlTagName: "img",
+                timestamp: targetTimestamp - 60,
+                totalTopLevelPosts: 8
+            }
+        ]);
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community: duplicateCommunity
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: pendingApprovalSettings({ branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community: duplicateCommunity
+        });
+
+        expect(allowResult).toEqual({ success: false, error: "This media was already posted recently." });
+        expect(reviewResult).toEqual({ success: false, error: "This media was already posted recently." });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("keeps meaningful query parameters when comparing exact media URLs", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_100;
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("different image transformation", {
+                comment: {
+                    link: "https://cdn.example.com/image.png?width=1200",
+                    linkHtmlTagName: "img",
+                    timestamp: targetTimestamp
+                }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows([
+                {
+                    link: "https://cdn.example.com/image.png?width=600",
+                    linkHtmlTagName: "img",
+                    timestamp: targetTimestamp - 60,
+                    totalTopLevelPosts: 8
+                }
+            ])
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("checks all visible threads even when a matching media URL is outside the bounded AI context", async () => {
+        const fetchMock = stubFetch();
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_150;
+        const mediaUrl = "https://cdn.example.com/still-visible.png";
+        const boundedPromptRows = Array.from({ length: 64 }, (_, index) => ({
+            link: `https://cdn.example.com/unrelated-${index}.png`,
+            linkHtmlTagName: "img",
+            timestamp: targetTimestamp - index - 1,
+            totalTopLevelPosts: 150
+        }));
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("same image as an older visible thread", {
+                comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows(boundedPromptRows, [{ link: mediaUrl, linkHtmlTagName: "img" }])
+        });
+
+        expect(result).toEqual({ success: false, error: "This media was already posted recently." });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("excludes archived threads from exact-media checks and AI duplicate context", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const prepare = vi.fn((sql: string) => ({ all: vi.fn(() => []) }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_175;
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("reuse from an archived thread", {
+                comment: {
+                    link: "https://cdn.example.com/archived.png",
+                    linkHtmlTagName: "img",
+                    timestamp: targetTimestamp
+                }
+            }),
+            challengeIndex: 1,
+            community: {
+                ...community,
+                _dbHandler: { _db: { prepare } }
+            } as unknown as LocalCommunity
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(prepare).toHaveBeenCalledTimes(2);
+        for (const [sql] of prepare.mock.calls) {
+            expect(sql).toContain("cu.archived IS NULL OR cu.archived IS NOT 1");
+        }
+    });
+
+    it("does not hard-reject an exact non-media link", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_200;
+        const articleUrl = "https://news.example.com/story";
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("new discussion of the same article", {
+                comment: {
+                    link: articleUrl,
+                    linkHtmlTagName: "a",
+                    timestamp: targetTimestamp
+                }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows([
+                {
+                    link: articleUrl,
+                    linkHtmlTagName: "a",
+                    timestamp: targetTimestamp - 60,
+                    totalTopLevelPosts: 8
+                }
+            ])
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("reserves an in-flight media URL without rejecting the second branch of the same publication", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_300;
+        const mediaUrl = "https://cdn.example.com/concurrent.png?variant=original";
+        const reservationCommunity = {
+            ...createCommunityWithDuplicateRows([]),
+            address: "reservation-test.bso"
+        } as unknown as LocalCommunity;
+        const firstRequest = createCommentRequest("first concurrent post", {
+            comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp },
+            request: { challengeRequestId: new Uint8Array([10, 11, 12, 13]) }
+        });
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/reservation", branch: "allow" }),
+            challengeRequestMessage: firstRequest,
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+        const samePublicationReviewResult = await challengeFile.getChallenge({
+            challengeSettings: pendingApprovalSettings({ apiUrl: "https://provider.example/reservation", branch: "review" }),
+            challengeRequestMessage: firstRequest,
+            challengeIndex: 2,
+            community: reservationCommunity
+        });
+        const competingResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/reservation", branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("second concurrent post", {
+                comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp + 1 },
+                request: { challengeRequestId: new Uint8Array([20, 21, 22, 23]) }
+            }),
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+
+        expect(allowResult).toEqual({ success: true });
+        expect(samePublicationReviewResult).toEqual({ success: false, error: "AI moderation branch did not match." });
+        expect(competingResult).toEqual({ success: false, error: "This media was already posted recently." });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it("retries without duplicate context when a duplicate review is not supported by recent posts", async () => {
@@ -1140,7 +1336,8 @@ describe("Bitsocial AI moderation challenge package", () => {
                 }
             }),
             challengeIndex: 1,
-            community: createCommunityWithDuplicateRows(duplicateRows)
+            // Keep this test focused on model-evidence normalization; exact active-media rejection is covered separately.
+            community: createCommunityWithDuplicateRows(duplicateRows, [])
         });
 
         expect(result).toEqual({

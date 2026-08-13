@@ -91,6 +91,7 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.
+- New top-level posts reuse neither an exact image, video, or audio URL from a non-archived top-level post nor an in-flight media URL in the same community. The deterministic check covers every thread still visible on the board pages, excludes archived threads, runs before any model request, and never enters pending approval; URL comparison upgrades HTTP to HTTPS, ignores fragments and default ports, and retains query parameters.
 - The challenge sends text, title, submission time, link URL/domain/path, URL-path date hints, flags, flairs, community address/title/description, `community.rules`, and a bounded activity-relative list of recent top-level posts for duplicate-thread checks when the local community database is available.
 - The model payload explicitly labels publication fields as untrusted user content, not instructions.
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.

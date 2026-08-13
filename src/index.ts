@@ -35,6 +35,8 @@ const MAX_DUPLICATE_CONTEXT_URL_CHARS = 500;
 const MAX_DUPLICATE_CONTEXT_PATH_CHARS = 300;
 const MIN_DUPLICATE_RECENCY_SECONDS = 6 * 60 * 60;
 const MAX_DUPLICATE_RECENCY_SECONDS = 30 * 24 * 60 * 60;
+const DUPLICATE_MEDIA_RESERVATION_TTL_MS = 2 * 60 * 1000;
+const DUPLICATE_MEDIA_ERROR = "This media was already posted recently.";
 const PROMPT_URL_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROMPT_URL_FETCH_TIMEOUT_MS = 5_000;
 const MAX_PROMPT_URL_BYTES = 64 * 1024;
@@ -312,6 +314,11 @@ type DuplicatePostRow = {
     totalTopLevelPosts?: number;
 };
 
+type ActiveMediaLinkRow = {
+    link: string;
+    linkHtmlTagName: string;
+};
+
 type DuplicatePostContext = {
     title?: string;
     content?: string;
@@ -339,9 +346,15 @@ type JsonCacheFile = {
     entries: Record<string, JsonCacheEntry>;
 };
 
+type DuplicateMediaReservation = {
+    publicationIdentity: string;
+    reservedAt: number;
+};
+
 const evaluateCache = new Map<string, Promise<ModelVerdict>>();
 const jsonCacheWrites = new Map<string, Promise<void>>();
 const auditLogWrites = new Map<string, Promise<void>>();
+const duplicateMediaReservations = new Map<string, DuplicateMediaReservation>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
@@ -881,6 +894,7 @@ const queryDuplicatePostRows = (db: SqliteDatabase, targetTimestamp: number): Du
               AND c.pendingApproval IS NOT 1
               AND COALESCE(cu.approved, 1) != 0
               AND (cu.removed IS NULL OR cu.removed IS NOT 1)
+              AND (cu.archived IS NULL OR cu.archived IS NOT 1)
               AND (
                   cu.edit IS NULL
                   OR json_extract(cu.edit, '$.deleted') IS NULL
@@ -975,6 +989,100 @@ const getDuplicateCheckContext = (
         log.error("AI moderation duplicate-check context read failed: %s", message);
         return undefined;
     }
+};
+
+const mediaLinkTagNames = new Set(["audio", "img", "video"]);
+
+const isMediaLinkTagName = (value: string | undefined) => typeof value === "string" && mediaLinkTagNames.has(value.toLowerCase());
+
+const normalizeDuplicateMediaUrl = (value: string) => {
+    try {
+        const url = new URL(value);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+        if (url.protocol === "http:") url.protocol = "https:";
+        url.hash = "";
+        return url.toString();
+    } catch {
+        return undefined;
+    }
+};
+
+const isActiveMediaLinkRow = (row: unknown): row is ActiveMediaLinkRow =>
+    isRecord(row) && typeof row.link === "string" && typeof row.linkHtmlTagName === "string";
+
+const queryActiveMediaLinkRows = (db: SqliteDatabase, targetTimestamp: number) =>
+    db
+        .prepare(
+            `
+            SELECT c.link, c.linkHtmlTagName
+            FROM comments c
+            LEFT JOIN commentUpdates cu ON cu.cid = c.cid
+            WHERE c.depth = 0
+              AND c.timestamp <= ?
+              AND c.pendingApproval IS NOT 1
+              AND COALESCE(cu.approved, 1) != 0
+              AND (cu.removed IS NULL OR cu.removed IS NOT 1)
+              AND (cu.archived IS NULL OR cu.archived IS NOT 1)
+              AND (
+                  cu.edit IS NULL
+                  OR json_extract(cu.edit, '$.deleted') IS NULL
+                  OR json_extract(cu.edit, '$.deleted') != 1
+              )
+              AND LOWER(c.linkHtmlTagName) IN ('audio', 'img', 'video')
+            `
+        )
+        .all(targetTimestamp)
+        .filter(isActiveMediaLinkRow);
+
+const getDuplicateMediaPublicationIdentity = (target: PublicationTarget) => target.challengeRequestIdHash ?? target.signatureHash;
+
+const pruneExpiredDuplicateMediaReservations = (now: number) => {
+    for (const [key, reservation] of duplicateMediaReservations) {
+        if (now - reservation.reservedAt >= DUPLICATE_MEDIA_RESERVATION_TTL_MS) {
+            duplicateMediaReservations.delete(key);
+        }
+    }
+};
+
+const getDuplicateMediaRejection = (
+    target: PublicationTarget,
+    runtimeCommunity: RuntimeCommunity | undefined,
+    communityContext: CommunityContext
+) => {
+    if (target.kind !== "post" || !target.link?.url || !isMediaLinkTagName(target.link.htmlTagName)) {
+        return undefined;
+    }
+
+    const normalizedTargetUrl = normalizeDuplicateMediaUrl(target.link.url);
+    if (!normalizedTargetUrl) return undefined;
+
+    const db = getCommunityDatabase(runtimeCommunity);
+    if (!db) return undefined;
+
+    try {
+        const targetTimestamp = target.timestamp ?? Math.floor(Date.now() / 1000);
+        const hasActiveDuplicate = queryActiveMediaLinkRows(db, targetTimestamp).some(
+            (row) => normalizeDuplicateMediaUrl(row.link) === normalizedTargetUrl
+        );
+        if (hasActiveDuplicate) return DUPLICATE_MEDIA_ERROR;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown duplicate-media error";
+        log.error("AI moderation active duplicate-media read failed: %s", message);
+    }
+
+    const publicationIdentity = getDuplicateMediaPublicationIdentity(target);
+    if (!communityContext.address || !publicationIdentity) return undefined;
+
+    const now = Date.now();
+    pruneExpiredDuplicateMediaReservations(now);
+    const reservationKey = sha256(`${communityContext.address}\n${normalizedTargetUrl}`);
+    const existingReservation = duplicateMediaReservations.get(reservationKey);
+    if (existingReservation && existingReservation.publicationIdentity !== publicationIdentity) {
+        return DUPLICATE_MEDIA_ERROR;
+    }
+
+    duplicateMediaReservations.set(reservationKey, { publicationIdentity, reservedAt: now });
+    return undefined;
 };
 
 const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challengeRequestMessage"]): ModerationTarget | undefined => {
@@ -1749,6 +1857,10 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
     const runtimeCommunity = getRuntimeCommunity(args);
     const duplicateCheck = getDuplicateCheckContext(runtimeCommunity, moderationTarget.target);
     const communityContext = getCommunityContext(runtimeCommunity, duplicateCheck);
+    const duplicateMediaRejection = getDuplicateMediaRejection(moderationTarget.target, runtimeCommunity, communityContext);
+    if (duplicateMediaRejection) {
+        return { success: false, error: duplicateMediaRejection };
+    }
 
     try {
         const response = await evaluate({
