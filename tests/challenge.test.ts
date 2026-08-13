@@ -1098,7 +1098,7 @@ describe("Bitsocial AI moderation challenge package", () => {
             community: duplicateCommunity
         });
         const reviewResult = await challengeFile.getChallenge({
-            challengeSettings: pendingApprovalSettings({ branch: "review", rejectDuplicateMedia: true }),
+            challengeSettings: pendingApprovalSettings({ branch: "review", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: request,
             challengeIndex: 2,
             community: duplicateCommunity

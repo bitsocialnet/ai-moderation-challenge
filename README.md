@@ -84,7 +84,7 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
 
 OpenAI-compatible APIs are a practical compatibility convention, not a formal open standard. Test custom providers before enabling the challenge on live communities.
 
-To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: true` on both the `allow` and `review` challenge entries. Leaving it unset preserves the default and does not perform the deterministic hard-rejection check.
+To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` on both the `allow` and `review` challenge entries. PKC challenge option values are strings; leaving this option unset preserves the default and does not perform the deterministic hard-rejection check.
 
 ## Behavior
 
@@ -94,7 +94,7 @@ To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: true` on
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.
-- When `rejectDuplicateMedia` is `true`, new top-level posts reuse neither an exact image, video, or audio URL from a non-archived top-level post nor an in-flight media URL in the same community. This option is disabled by default and is configured independently by each community operator. The deterministic check covers every non-archived thread, runs before any model request, and never enters pending approval; URL comparison upgrades HTTP to HTTPS, ignores fragments and default ports, and retains query parameters.
+- When `rejectDuplicateMedia` is `"true"`, new top-level posts reuse neither an exact image, video, or audio URL from a non-archived top-level post nor an in-flight media URL in the same community. This option is disabled by default and is configured independently by each community operator. The deterministic check covers every non-archived thread, runs before any model request, and never enters pending approval; URL comparison upgrades HTTP to HTTPS, ignores fragments and default ports, and retains query parameters.
 - The challenge sends text, title, submission time, link URL/domain/path, URL-path date hints, flags, flairs, community address/title/description, `community.rules`, and a bounded activity-relative list of recent top-level posts for duplicate-thread checks when the local community database is available.
 - The model payload explicitly labels publication fields as untrusted user content, not instructions.
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.
