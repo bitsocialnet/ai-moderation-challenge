@@ -33,6 +33,7 @@ export type ParsedOptions = {
     promptBearerToken?: string;
     cachePath?: string;
     auditLogPath?: string;
+    rejectDuplicateMedia: boolean;
     error: string;
 };
 
@@ -98,6 +99,17 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
         return trimmed ? trimmed : undefined;
     };
 
+    const resolveOptionBoolean = (value: unknown, option: OptionName) => {
+        const resolved = resolveOptionString(value, option);
+        if (typeof resolved === "boolean") return resolved;
+        if (typeof resolved !== "string") return resolved;
+
+        const normalized = resolved.trim().toLowerCase();
+        if (normalized === "true") return true;
+        if (normalized === "false") return false;
+        return resolved;
+    };
+
     const schema: z.ZodType<ParsedOptions> = z.preprocess(
         (value) => (value && typeof value === "object" ? value : {}),
         z.object({
@@ -143,6 +155,7 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
                 z.string().optional()
             ),
+            rejectDuplicateMedia: z.preprocess((value) => resolveOptionBoolean(value, "rejectDuplicateMedia"), z.boolean()),
             error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
         })
     );

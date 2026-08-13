@@ -202,6 +202,8 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(options).toContain("promptBearerToken");
         expect(options).toContain("cachePath");
         expect(options).toContain("auditLogPath");
+        expect(options).toContain("rejectDuplicateMedia");
+        expect(challengeFile.optionInputs.find((input) => input.option === "rejectDuplicateMedia")?.default).toBe("false");
         expect(options).not.toContain("apiKeyEnv");
         expect(options).not.toContain("promptVersion");
         expect(options).not.toContain("serverUrl");
@@ -1032,7 +1034,43 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(JSON.stringify(userPayload.community.duplicateCheck)).not.toContain("author");
     });
 
-    it("hard-rejects an exact recent media URL in both branches without calling the provider", async () => {
+    it("allows exact recent media URLs by default", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_779_999_900;
+        const duplicateRows = [
+            {
+                link: "https://files.catbox.moe/98w833.png",
+                linkHtmlTagName: "img",
+                timestamp: targetTimestamp - 60,
+                totalTopLevelPosts: 8
+            }
+        ];
+        const prepare = vi.fn(() => ({ all: vi.fn(() => duplicateRows) }));
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("duplicate media is permitted by this community", {
+                comment: {
+                    link: "https://files.catbox.moe/98w833.png",
+                    linkHtmlTagName: "img",
+                    timestamp: targetTimestamp
+                }
+            }),
+            challengeIndex: 1,
+            community: {
+                ...community,
+                _dbHandler: { _db: { prepare } }
+            } as unknown as LocalCommunity
+        });
+
+        expect(result).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(prepare).toHaveBeenCalledTimes(1);
+        expect(prepare.mock.calls[0]?.[0]).toContain("COUNT(*) OVER()");
+    });
+
+    it("hard-rejects an exact recent media URL in both branches when enabled without calling the provider", async () => {
         const fetchMock = stubFetch();
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const targetTimestamp = 1_780_000_000;
@@ -1054,13 +1092,13 @@ describe("Bitsocial AI moderation challenge package", () => {
         ]);
 
         const allowResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ branch: "allow" }),
+            challengeSettings: settings({ branch: "allow", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: request,
             challengeIndex: 1,
             community: duplicateCommunity
         });
         const reviewResult = await challengeFile.getChallenge({
-            challengeSettings: pendingApprovalSettings({ branch: "review" }),
+            challengeSettings: pendingApprovalSettings({ branch: "review", rejectDuplicateMedia: true }),
             challengeRequestMessage: request,
             challengeIndex: 2,
             community: duplicateCommunity
@@ -1077,7 +1115,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         const targetTimestamp = 1_780_000_100;
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings({ branch: "allow" }),
+            challengeSettings: settings({ branch: "allow", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: createCommentRequest("different image transformation", {
                 comment: {
                     link: "https://cdn.example.com/image.png?width=1200",
@@ -1113,7 +1151,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         }));
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings({ branch: "allow" }),
+            challengeSettings: settings({ branch: "allow", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: createCommentRequest("same image as an older visible thread", {
                 comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp }
             }),
@@ -1132,7 +1170,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         const targetTimestamp = 1_780_000_175;
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings({ branch: "allow" }),
+            challengeSettings: settings({ branch: "allow", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: createCommentRequest("reuse from an archived thread", {
                 comment: {
                     link: "https://cdn.example.com/archived.png",
@@ -1162,7 +1200,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         const articleUrl = "https://news.example.com/story";
 
         const result = await challengeFile.getChallenge({
-            challengeSettings: settings({ branch: "allow" }),
+            challengeSettings: settings({ branch: "allow", rejectDuplicateMedia: "true" }),
             challengeRequestMessage: createCommentRequest("new discussion of the same article", {
                 comment: {
                     link: articleUrl,
@@ -1200,19 +1238,31 @@ describe("Bitsocial AI moderation challenge package", () => {
         });
 
         const allowResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/reservation", branch: "allow" }),
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation",
+                branch: "allow",
+                rejectDuplicateMedia: "true"
+            }),
             challengeRequestMessage: firstRequest,
             challengeIndex: 1,
             community: reservationCommunity
         });
         const samePublicationReviewResult = await challengeFile.getChallenge({
-            challengeSettings: pendingApprovalSettings({ apiUrl: "https://provider.example/reservation", branch: "review" }),
+            challengeSettings: pendingApprovalSettings({
+                apiUrl: "https://provider.example/reservation",
+                branch: "review",
+                rejectDuplicateMedia: "true"
+            }),
             challengeRequestMessage: firstRequest,
             challengeIndex: 2,
             community: reservationCommunity
         });
         const competingResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/reservation", branch: "allow" }),
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation",
+                branch: "allow",
+                rejectDuplicateMedia: "true"
+            }),
             challengeRequestMessage: createCommentRequest("second concurrent post", {
                 comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp + 1 },
                 request: { challengeRequestId: new Uint8Array([20, 21, 22, 23]) }
@@ -1864,6 +1914,22 @@ describe("Bitsocial AI moderation challenge package", () => {
         const result = await challengeFile.getChallenge({
             challengeSettings: { options: { branch: "maybe" } } as CommunityChallengeSetting,
             challengeRequestMessage: createCommentRequest("invalid options"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toHaveProperty("success", false);
+        expect((result as { error?: string }).error).toMatch(/Invalid challenge options/);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid duplicate-media option values", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ rejectDuplicateMedia: "sometimes" }),
+            challengeRequestMessage: createCommentRequest("invalid duplicate media option"),
             challengeIndex: 1,
             community
         });

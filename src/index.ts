@@ -213,6 +213,13 @@ const optionInputs = [
         placeholder: "~/.bitsocial-ai-moderation-audit.jsonl"
     },
     {
+        option: "rejectDuplicateMedia",
+        label: "Reject duplicate media",
+        default: "false",
+        description: "Reject top-level posts that reuse media from a non-archived post in this community",
+        placeholder: "false"
+    },
+    {
         option: "error",
         label: "Error",
         default: DEFAULT_ERROR,
@@ -1857,7 +1864,9 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
     const runtimeCommunity = getRuntimeCommunity(args);
     const duplicateCheck = getDuplicateCheckContext(runtimeCommunity, moderationTarget.target);
     const communityContext = getCommunityContext(runtimeCommunity, duplicateCheck);
-    const duplicateMediaRejection = getDuplicateMediaRejection(moderationTarget.target, runtimeCommunity, communityContext);
+    const duplicateMediaRejection = options.rejectDuplicateMedia
+        ? getDuplicateMediaRejection(moderationTarget.target, runtimeCommunity, communityContext)
+        : undefined;
     if (duplicateMediaRejection) {
         return { success: false, error: duplicateMediaRejection };
     }

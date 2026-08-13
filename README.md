@@ -47,20 +47,21 @@ Production operators should keep the real moderation prompt in a private node-lo
 
 ## Options
 
-| Option              | Default                                  | Description                                                                           |
-| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| `apiUrl`            | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                   |
-| `apiFormat`         | `responses`                              | Request/response format: `responses` or `chat-completions`                            |
-| `apiKey`            | none                                     | Private provider API key                                                              |
-| `model`             | `gpt-5.4-nano`                           | Model name sent to the provider                                                       |
-| `branch`            | `allow`                                  | Branch mode: `allow` or `review`                                                      |
-| `prompt`            | built-in prompt                          | Private inline system prompt text                                                     |
-| `promptPath`        | none                                     | Private file path for a system prompt on the community node                           |
-| `promptUrl`         | none                                     | Private HTTPS URL for a remotely hosted system prompt                                 |
-| `promptBearerToken` | none                                     | Private bearer token sent only when fetching `promptUrl`                              |
-| `cachePath`         | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching |
-| `auditLogPath`      | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging |
-| `error`             | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit  |
+| Option                 | Default                                  | Description                                                                                                    |
+| ---------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `apiUrl`               | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
+| `apiFormat`            | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
+| `apiKey`               | none                                     | Private provider API key                                                                                       |
+| `model`                | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
+| `branch`               | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
+| `prompt`               | built-in prompt                          | Private inline system prompt text                                                                              |
+| `promptPath`           | none                                     | Private file path for a system prompt on the community node                                                    |
+| `promptUrl`            | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
+| `promptBearerToken`    | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
+| `cachePath`            | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
+| `auditLogPath`         | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
+| `rejectDuplicateMedia` | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
+| `error`                | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
 
 Prompt source precedence is `prompt` > `promptPath` > `promptUrl` > built-in fallback. If multiple private prompt sources are configured, the challenge uses the highest-precedence source and emits a warning about the ignored source.
 
@@ -83,6 +84,8 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
 
 OpenAI-compatible APIs are a practical compatibility convention, not a formal open standard. Test custom providers before enabling the challenge on live communities.
 
+To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: true` on both the `allow` and `review` challenge entries. Leaving it unset preserves the default and does not perform the deterministic hard-rejection check.
+
 ## Behavior
 
 - New comments with verdict `allow` publish normally.
@@ -91,7 +94,7 @@ OpenAI-compatible APIs are a practical compatibility convention, not a formal op
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.
-- New top-level posts reuse neither an exact image, video, or audio URL from a non-archived top-level post nor an in-flight media URL in the same community. The deterministic check covers every thread still visible on the board pages, excludes archived threads, runs before any model request, and never enters pending approval; URL comparison upgrades HTTP to HTTPS, ignores fragments and default ports, and retains query parameters.
+- When `rejectDuplicateMedia` is `true`, new top-level posts reuse neither an exact image, video, or audio URL from a non-archived top-level post nor an in-flight media URL in the same community. This option is disabled by default and is configured independently by each community operator. The deterministic check covers every non-archived thread, runs before any model request, and never enters pending approval; URL comparison upgrades HTTP to HTTPS, ignores fragments and default ports, and retains query parameters.
 - The challenge sends text, title, submission time, link URL/domain/path, URL-path date hints, flags, flairs, community address/title/description, `community.rules`, and a bounded activity-relative list of recent top-level posts for duplicate-thread checks when the local community database is available.
 - The model payload explicitly labels publication fields as untrusted user content, not instructions.
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.
