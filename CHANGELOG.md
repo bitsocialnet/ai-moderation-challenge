@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.10...v0.1.11) (2026-08-13)
+
+### Bug Fixes
+
+* **challenge:** make duplicate media rejection opt-in ([ed6db9f](https://github.com/bitsocialnet/ai-moderation-challenge/commit/ed6db9fe595fee3fd01709edf1f2c456c5ca59dd))
+* **challenge:** reject duplicate active media ([5c1d9df](https://github.com/bitsocialnet/ai-moderation-challenge/commit/5c1d9df5fd7559e974baa3a0f6fcf42965bee023))
+
 ## [0.1.10](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.9...v0.1.10) (2026-07-06)
 
 ### Bug Fixes
