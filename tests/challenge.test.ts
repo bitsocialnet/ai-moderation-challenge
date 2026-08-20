@@ -1473,6 +1473,11 @@ describe("Bitsocial AI moderation challenge package", () => {
             expect(cacheFileText).not.toContain(prompt);
             expect(cacheFileText).not.toContain("test-key");
 
+            for (const entry of Object.values(cacheFile.entries) as Array<Record<string, unknown>>) {
+                delete entry.providerModel;
+            }
+            await writeFile(cachePath, `${JSON.stringify(cacheFile, null, 2)}\n`, "utf8");
+
             vi.resetModules();
             const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
             vi.stubGlobal("fetch", freshFetchMock);
@@ -1773,6 +1778,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
     it("retries HTTP 429 responses once with the configured fallback model", async () => {
         const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-fallback-"));
+        const cachePath = join(tempDir, "cache.json");
         const auditLogPath = join(tempDir, "audit.jsonl");
         const fetchMock = stubFetch(
             createRawResponse(JSON.stringify({ code: "resource-exhausted" }), 429),
@@ -1786,6 +1792,7 @@ describe("Bitsocial AI moderation challenge package", () => {
                     apiUrl: "https://provider.example/capacity-fallback",
                     model: "primary-model",
                     fallbackModel: "fallback-model",
+                    cachePath,
                     auditLogPath,
                     branch: "allow"
                 }),
@@ -1799,9 +1806,44 @@ describe("Bitsocial AI moderation challenge package", () => {
             expect(getRequestBody(fetchMock, 0)).toMatchObject({ model: "primary-model" });
             expect(getRequestBody(fetchMock, 1)).toMatchObject({ model: "fallback-model" });
 
-            const auditEntry = JSON.parse((await readFile(auditLogPath, "utf8")).trim()) as Record<string, unknown>;
-            expect(auditEntry).toMatchObject({
+            vi.resetModules();
+            const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
+            vi.stubGlobal("fetch", freshFetchMock);
+            const { default: FreshChallengeFileFactory } = await import("../src/index.js");
+            const freshChallengeFile = FreshChallengeFileFactory({} as CommunityChallengeSetting);
+            const cachedResult = await freshChallengeFile.getChallenge({
+                challengeSettings: settings({
+                    apiUrl: "https://provider.example/capacity-fallback",
+                    model: "primary-model",
+                    fallbackModel: "fallback-model",
+                    cachePath,
+                    auditLogPath,
+                    branch: "allow"
+                }),
+                challengeRequestMessage: createCommentRequest("capacity fallback comment"),
+                challengeIndex: 1,
+                community
+            });
+
+            expect(cachedResult).toEqual({ success: true });
+            expect(freshFetchMock).not.toHaveBeenCalled();
+
+            const auditEntries = (await readFile(auditLogPath, "utf8"))
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(auditEntries).toHaveLength(2);
+            expect(auditEntries[0]).toMatchObject({
                 action: "approved",
+                source: "provider",
+                provider: {
+                    model: "fallback-model",
+                    fallbackFromModel: "primary-model"
+                }
+            });
+            expect(auditEntries[1]).toMatchObject({
+                action: "approved",
+                source: "cache",
                 provider: {
                     model: "fallback-model",
                     fallbackFromModel: "primary-model"

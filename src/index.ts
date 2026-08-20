@@ -353,6 +353,7 @@ type DuplicateCheckContext = {
 type JsonCacheEntry = {
     cachedAt: number;
     verdict: ModelVerdict;
+    providerModel?: string;
 };
 
 type JsonCacheFile = {
@@ -446,7 +447,8 @@ const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
         if (!verdict.success) return acc;
         acc[key] = {
             cachedAt: entry.cachedAt,
-            verdict: verdict.data
+            verdict: verdict.data,
+            ...(typeof entry.providerModel === "string" ? { providerModel: entry.providerModel } : {})
         };
         return acc;
     }, {});
@@ -471,7 +473,7 @@ const readJsonCache = async (cachePath: string): Promise<JsonCacheFile> => {
 const getCachedVerdictFromJson = async (cachePath: string | undefined, cacheKey: string) => {
     if (!cachePath) return undefined;
     const cache = await readJsonCache(cachePath);
-    return cache.entries[cacheKey]?.verdict;
+    return cache.entries[cacheKey];
 };
 
 const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
@@ -479,12 +481,23 @@ const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
     return Object.fromEntries(sortedEntries.slice(0, MAX_JSON_CACHE_ENTRIES));
 };
 
-const writeJsonCache = async ({ cachePath, cacheKey, verdict }: { cachePath: string; cacheKey: string; verdict: ModelVerdict }) => {
+const writeJsonCache = async ({
+    cachePath,
+    cacheKey,
+    verdict,
+    providerModel
+}: {
+    cachePath: string;
+    cacheKey: string;
+    verdict: ModelVerdict;
+    providerModel: string;
+}) => {
     const resolvedCachePath = expandPrivatePath(cachePath);
     const cache = await readJsonCache(cachePath);
     cache.entries[cacheKey] = {
         cachedAt: Date.now(),
-        verdict
+        verdict,
+        providerModel
     };
     cache.entries = pruneJsonCacheEntries(cache.entries);
 
@@ -756,18 +769,20 @@ const writeAuditLogEntry = async ({ auditLogPath, entry }: { auditLogPath: strin
 const setCachedVerdictInJson = async ({
     cachePath,
     cacheKey,
-    verdict
+    verdict,
+    providerModel
 }: {
     cachePath: string | undefined;
     cacheKey: string;
     verdict: ModelVerdict;
+    providerModel: string;
 }) => {
     if (!cachePath) return;
 
     const previousWrite = jsonCacheWrites.get(cachePath) ?? Promise.resolve();
     const nextWrite = previousWrite
         .catch(() => undefined)
-        .then(() => writeJsonCache({ cachePath, cacheKey, verdict }))
+        .then(() => writeJsonCache({ cachePath, cacheKey, verdict, providerModel }))
         .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : "Unknown JSON cache write error";
             log.error("AI moderation JSON cache write failed: %s", message);
@@ -1868,9 +1883,9 @@ const evaluate = async ({
         return cached;
     }
 
-    const cachedVerdict = await getCachedVerdictFromJson(options.cachePath, cacheKey);
-    if (cachedVerdict) {
-        const cachedPromise = Promise.resolve(cachedVerdict);
+    const cachedEntry = await getCachedVerdictFromJson(options.cachePath, cacheKey);
+    if (cachedEntry) {
+        const cachedPromise = Promise.resolve(cachedEntry.verdict);
         addCachedPromise(cacheKey, cachedPromise);
         await writeAuditLogEntry({
             auditLogPath: options.auditLogPath,
@@ -1881,10 +1896,11 @@ const evaluate = async ({
                 promptHash,
                 communityContext,
                 target,
-                verdict: cachedVerdict
+                verdict: cachedEntry.verdict,
+                providerModel: cachedEntry.providerModel
             })
         });
-        return cachedVerdict;
+        return cachedEntry.verdict;
     }
 
     const promise = requestProviderVerdictWithFallback({
@@ -1918,7 +1934,8 @@ const evaluate = async ({
             await setCachedVerdictInJson({
                 cachePath: options.cachePath,
                 cacheKey,
-                verdict
+                verdict,
+                providerModel
             });
             await writeAuditLogEntry({
                 auditLogPath: options.auditLogPath,
