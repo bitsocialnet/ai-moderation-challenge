@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-* **moderation:** fall back on model capacity errors ([0e94a55](https://github.com/bitsocialnet/ai-moderation-challenge/commit/0e94a554a79f8b05ee14de3cadb2cc5e2240e5a4))
+- **moderation:** fall back on model capacity errors ([0e94a55](https://github.com/bitsocialnet/ai-moderation-challenge/commit/0e94a554a79f8b05ee14de3cadb2cc5e2240e5a4))
 
 ## [0.1.11](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.10...v0.1.11) (2026-08-13)
 
