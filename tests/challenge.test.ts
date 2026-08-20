@@ -195,6 +195,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(options).toContain("apiFormat");
         expect(options).toContain("apiKey");
         expect(options).toContain("model");
+        expect(options).toContain("fallbackModel");
         expect(options).toContain("branch");
         expect(options).toContain("prompt");
         expect(options).toContain("promptPath");
@@ -1472,6 +1473,11 @@ describe("Bitsocial AI moderation challenge package", () => {
             expect(cacheFileText).not.toContain(prompt);
             expect(cacheFileText).not.toContain("test-key");
 
+            for (const entry of Object.values(cacheFile.entries) as Array<Record<string, unknown>>) {
+                delete entry.providerModel;
+            }
+            await writeFile(cachePath, `${JSON.stringify(cacheFile, null, 2)}\n`, "utf8");
+
             vi.resetModules();
             const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
             vi.stubGlobal("fetch", freshFetchMock);
@@ -1754,14 +1760,159 @@ describe("Bitsocial AI moderation challenge package", () => {
             community
         });
         const reviewResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/comment-outage", branch: "review" }),
+            challengeSettings: pendingApprovalSettings({ apiUrl: "https://provider.example/comment-outage", branch: "review" }),
             challengeRequestMessage: request,
             challengeIndex: 2,
             community
         });
 
         expect(allowResult).toEqual({ success: false, error: "network down" });
-        expect(reviewResult).toEqual({ success: true });
+        expect(reviewResult).toEqual({
+            success: true,
+            commentUpdate: {
+                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+            }
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries HTTP 429 responses once with the configured fallback model", async () => {
+        const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-fallback-"));
+        const cachePath = join(tempDir, "cache.json");
+        const auditLogPath = join(tempDir, "audit.jsonl");
+        const fetchMock = stubFetch(
+            createRawResponse(JSON.stringify({ code: "resource-exhausted" }), 429),
+            createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        try {
+            const result = await challengeFile.getChallenge({
+                challengeSettings: settings({
+                    apiUrl: "https://provider.example/capacity-fallback",
+                    model: "primary-model",
+                    fallbackModel: "fallback-model",
+                    cachePath,
+                    auditLogPath,
+                    branch: "allow"
+                }),
+                challengeRequestMessage: createCommentRequest("capacity fallback comment"),
+                challengeIndex: 1,
+                community
+            });
+
+            expect(result).toEqual({ success: true });
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+            expect(getRequestBody(fetchMock, 0)).toMatchObject({ model: "primary-model" });
+            expect(getRequestBody(fetchMock, 1)).toMatchObject({ model: "fallback-model" });
+
+            vi.resetModules();
+            const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
+            vi.stubGlobal("fetch", freshFetchMock);
+            const { default: FreshChallengeFileFactory } = await import("../src/index.js");
+            const freshChallengeFile = FreshChallengeFileFactory({} as CommunityChallengeSetting);
+            const cachedResult = await freshChallengeFile.getChallenge({
+                challengeSettings: settings({
+                    apiUrl: "https://provider.example/capacity-fallback",
+                    model: "primary-model",
+                    fallbackModel: "fallback-model",
+                    cachePath,
+                    auditLogPath,
+                    branch: "allow"
+                }),
+                challengeRequestMessage: createCommentRequest("capacity fallback comment"),
+                challengeIndex: 1,
+                community
+            });
+
+            expect(cachedResult).toEqual({ success: true });
+            expect(freshFetchMock).not.toHaveBeenCalled();
+
+            const auditEntries = (await readFile(auditLogPath, "utf8"))
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(auditEntries).toHaveLength(2);
+            expect(auditEntries[0]).toMatchObject({
+                action: "approved",
+                source: "provider",
+                provider: {
+                    model: "fallback-model",
+                    fallbackFromModel: "primary-model"
+                }
+            });
+            expect(auditEntries[1]).toMatchObject({
+                action: "approved",
+                source: "cache",
+                provider: {
+                    model: "fallback-model",
+                    fallbackFromModel: "primary-model"
+                }
+            });
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    it("attaches a generic review reason when both primary and fallback models fail", async () => {
+        const fetchMock = stubFetch(
+            createRawResponse(JSON.stringify({ code: "resource-exhausted" }), 429),
+            createRawResponse(JSON.stringify({ error: "fallback unavailable" }), 503)
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const request = createReplyRequest("fallback outage reply");
+        const options = {
+            apiUrl: "https://provider.example/fallback-outage",
+            model: "primary-model",
+            fallbackModel: "fallback-model"
+        };
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ ...options, branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: pendingApprovalSettings({ ...options, branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community
+        });
+
+        expect(allowResult).toMatchObject({
+            success: false,
+            error: expect.stringContaining("fallback model fallback-model failed")
+        });
+        expect(reviewResult).toEqual({
+            success: true,
+            commentUpdate: {
+                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this reply to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+            }
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not use the fallback model for non-capacity API errors", async () => {
+        const fetchMock = stubFetch(createRawResponse(JSON.stringify({ error: "bad request" }), 400));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/non-capacity-error",
+                model: "primary-model",
+                fallbackModel: "fallback-model",
+                branch: "allow"
+            }),
+            challengeRequestMessage: createCommentRequest("non capacity error comment"),
+            challengeIndex: 1,
+            community
+        });
+
+        expect(result).toEqual({
+            success: false,
+            error: 'AI moderation API error (400): {"error":"bad request"}'
+        });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 

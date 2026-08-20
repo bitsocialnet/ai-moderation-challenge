@@ -48,6 +48,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
         name: "@bitsocial/ai-moderation-challenge",
         options: {
             apiKey: "sk-...",
+            fallbackModel: "grok-4.5",
             branch: "allow",
             promptUrl: "https://prompt.example.com/v1/prompts/ai-moderation.md",
             promptBearerToken: "shared-secret-token"
@@ -58,6 +59,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
         name: "@bitsocial/ai-moderation-challenge",
         options: {
             apiKey: "sk-...",
+            fallbackModel: "grok-4.5",
             branch: "review",
             promptUrl: "https://prompt.example.com/v1/prompts/ai-moderation.md",
             promptBearerToken: "shared-secret-token"
@@ -80,6 +82,7 @@ Production operators should keep the real moderation prompt in a private node-lo
 | `apiFormat`            | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
 | `apiKey`               | none                                     | Private provider API key                                                                                       |
 | `model`                | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
+| `fallbackModel`        | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
 | `branch`               | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
 | `prompt`               | built-in prompt                          | Private inline system prompt text                                                                              |
 | `promptPath`           | none                                     | Private file path for a system prompt on the community node                                                    |
@@ -118,6 +121,8 @@ To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` 
 - New comments with verdict `allow` publish normally.
 - New comments with verdict `review` are sent to pending approval with the redacted model reason attached for the author.
 - New comments are also sent to pending approval if the model API is unavailable.
+- When `fallbackModel` is configured, an HTTP 429 from the primary model is retried once with the fallback model before the publication is sent to pending approval.
+- Comments sent to pending approval because moderation is unavailable include a generic moderator-visible reason; provider details remain in the private audit log.
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
 - Content edits are rejected if the model API is unavailable.
 - Delete-only edits and non-comment publication types bypass AI moderation.

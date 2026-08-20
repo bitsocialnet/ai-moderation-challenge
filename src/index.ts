@@ -164,6 +164,13 @@ const optionInputs = [
         placeholder: DEFAULT_MODEL
     },
     {
+        option: "fallbackModel",
+        label: "Fallback model",
+        default: "",
+        description: "Secondary model used when the primary model returns HTTP 429",
+        placeholder: "grok-4.5"
+    },
+    {
         option: "branch",
         label: "Branch",
         default: "allow",
@@ -346,6 +353,7 @@ type DuplicateCheckContext = {
 type JsonCacheEntry = {
     cachedAt: number;
     verdict: ModelVerdict;
+    providerModel?: string;
 };
 
 type JsonCacheFile = {
@@ -439,7 +447,8 @@ const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
         if (!verdict.success) return acc;
         acc[key] = {
             cachedAt: entry.cachedAt,
-            verdict: verdict.data
+            verdict: verdict.data,
+            ...(typeof entry.providerModel === "string" ? { providerModel: entry.providerModel } : {})
         };
         return acc;
     }, {});
@@ -464,7 +473,7 @@ const readJsonCache = async (cachePath: string): Promise<JsonCacheFile> => {
 const getCachedVerdictFromJson = async (cachePath: string | undefined, cacheKey: string) => {
     if (!cachePath) return undefined;
     const cache = await readJsonCache(cachePath);
-    return cache.entries[cacheKey]?.verdict;
+    return cache.entries[cacheKey];
 };
 
 const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
@@ -472,12 +481,23 @@ const pruneJsonCacheEntries = (entries: Record<string, JsonCacheEntry>) => {
     return Object.fromEntries(sortedEntries.slice(0, MAX_JSON_CACHE_ENTRIES));
 };
 
-const writeJsonCache = async ({ cachePath, cacheKey, verdict }: { cachePath: string; cacheKey: string; verdict: ModelVerdict }) => {
+const writeJsonCache = async ({
+    cachePath,
+    cacheKey,
+    verdict,
+    providerModel
+}: {
+    cachePath: string;
+    cacheKey: string;
+    verdict: ModelVerdict;
+    providerModel: string;
+}) => {
     const resolvedCachePath = expandPrivatePath(cachePath);
     const cache = await readJsonCache(cachePath);
     cache.entries[cacheKey] = {
         cachedAt: Date.now(),
-        verdict
+        verdict,
+        providerModel
     };
     cache.entries = pruneJsonCacheEntries(cache.entries);
 
@@ -653,7 +673,8 @@ const createAuditEntry = ({
     communityContext,
     target,
     verdict,
-    error
+    error,
+    providerModel = options.model
 }: {
     source: "provider" | "cache";
     cacheKey: string;
@@ -663,6 +684,7 @@ const createAuditEntry = ({
     target: PublicationTarget;
     verdict?: ModelVerdict;
     error?: unknown;
+    providerModel?: string;
 }) => ({
     version: 1,
     loggedAt: new Date().toISOString(),
@@ -678,7 +700,8 @@ const createAuditEntry = ({
             }
         })(),
         apiFormat: options.apiFormat,
-        model: options.model
+        model: providerModel,
+        ...(providerModel !== options.model ? { fallbackFromModel: options.model } : {})
     },
     promptHash,
     community: {
@@ -746,18 +769,20 @@ const writeAuditLogEntry = async ({ auditLogPath, entry }: { auditLogPath: strin
 const setCachedVerdictInJson = async ({
     cachePath,
     cacheKey,
-    verdict
+    verdict,
+    providerModel
 }: {
     cachePath: string | undefined;
     cacheKey: string;
     verdict: ModelVerdict;
+    providerModel: string;
 }) => {
     if (!cachePath) return;
 
     const previousWrite = jsonCacheWrites.get(cachePath) ?? Promise.resolve();
     const nextWrite = previousWrite
         .catch(() => undefined)
-        .then(() => writeJsonCache({ cachePath, cacheKey, verdict }))
+        .then(() => writeJsonCache({ cachePath, cacheKey, verdict, providerModel }))
         .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : "Unknown JSON cache write error";
             log.error("AI moderation JSON cache write failed: %s", message);
@@ -1154,12 +1179,34 @@ const getBypassResult = (options: ParsedOptions): ChallengeResultInput => {
     return { success: false, error: "AI moderation review branch skipped." };
 };
 
-const getFallbackResult = (kind: ModeratedKind, options: ParsedOptions, error: unknown): ChallengeResultInput => {
+const MODERATION_UNAVAILABLE_REASON = "the moderation service was temporarily unavailable, so manual review is required";
+
+const getFallbackResult = ({
+    kind,
+    options,
+    error,
+    pendingApproval,
+    targetKind,
+    communityContext
+}: {
+    kind: ModeratedKind;
+    options: ParsedOptions;
+    error: unknown;
+    pendingApproval: boolean;
+    targetKind: PublicationTarget["kind"];
+    communityContext: CommunityContext;
+}): ChallengeResultInput => {
     const message = error instanceof Error ? error.message : "Unknown AI moderation error";
     log.error("AI moderation failed: %s", message);
 
     if (kind === "comment" && options.branch === "review") {
-        return { success: true };
+        return getSuccessResult({
+            pendingApproval,
+            reason: MODERATION_UNAVAILABLE_REASON,
+            targetKind,
+            matchedRuleIndexes: undefined,
+            communityContext
+        });
     }
 
     return { success: false, error: kind === "content-edit" ? options.error : message };
@@ -1484,23 +1531,35 @@ const createChatCompletionsRequestBody = ({
 
 const createModelRequestBody = ({
     options,
+    model = options.model,
     systemPrompt,
     communityContext,
     target
 }: {
     options: ParsedOptions;
+    model?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
 }) => {
     const props = {
-        model: options.model,
+        model,
         systemPrompt,
         communityContext,
         target
     };
     return options.apiFormat === "chat-completions" ? createChatCompletionsRequestBody(props) : createResponsesRequestBody(props);
 };
+
+class AiModerationApiError extends Error {
+    readonly status: number;
+
+    constructor(status: number, message: string) {
+        super(message);
+        this.name = "AiModerationApiError";
+        this.status = status;
+    }
+}
 
 const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; apiKey: string; body: unknown }) => {
     log.trace(`POST ${options.apiUrl} request sent`);
@@ -1519,7 +1578,7 @@ const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; api
 
     if (!response.ok) {
         const details = responseText ? `: ${responseText}` : "";
-        throw new Error(`AI moderation API error (${response.status})${details}`);
+        throw new AiModerationApiError(response.status, `AI moderation API error (${response.status})${details}`);
     }
 
     try {
@@ -1704,12 +1763,14 @@ const withoutDuplicateCheck = (communityContext: CommunityContext): CommunityCon
 
 const requestProviderVerdict = async ({
     options,
+    model = options.model,
     apiKey,
     systemPrompt,
     communityContext,
     target
 }: {
     options: ParsedOptions;
+    model?: string;
     apiKey: string;
     systemPrompt: string;
     communityContext: CommunityContext;
@@ -1721,12 +1782,76 @@ const requestProviderVerdict = async ({
             apiKey,
             body: createModelRequestBody({
                 options,
+                model,
                 systemPrompt,
                 communityContext,
                 target
             })
         })
     );
+
+type ProviderVerdict = {
+    verdict: ModelVerdict;
+    model: string;
+};
+
+class AiModerationFallbackError extends Error {
+    constructor(primaryModel: string, primaryError: unknown, fallbackModel: string, fallbackError: unknown) {
+        const getMessage = (error: unknown) => (error instanceof Error ? error.message : "Unknown AI moderation error");
+        super(
+            `Primary model ${primaryModel} failed: ${getMessage(primaryError)}; fallback model ${fallbackModel} failed: ${getMessage(fallbackError)}`
+        );
+        this.name = "AiModerationFallbackError";
+    }
+}
+
+const requestProviderVerdictWithFallback = async ({
+    options,
+    apiKey,
+    systemPrompt,
+    communityContext,
+    target
+}: {
+    options: ParsedOptions;
+    apiKey: string;
+    systemPrompt: string;
+    communityContext: CommunityContext;
+    target: ModelPublicationTarget;
+}): Promise<ProviderVerdict> => {
+    try {
+        return {
+            verdict: await requestProviderVerdict({ options, apiKey, systemPrompt, communityContext, target }),
+            model: options.model
+        };
+    } catch (primaryError) {
+        const fallbackModel = options.fallbackModel;
+        if (
+            !(primaryError instanceof AiModerationApiError) ||
+            primaryError.status !== 429 ||
+            !fallbackModel ||
+            fallbackModel === options.model
+        ) {
+            throw primaryError;
+        }
+
+        log.trace("AI moderation model %s returned HTTP 429; retrying with fallback model %s", options.model, fallbackModel);
+        try {
+            return {
+                verdict: await requestProviderVerdict({
+                    options,
+                    model: fallbackModel,
+                    apiKey,
+                    systemPrompt,
+                    communityContext,
+                    target
+                }),
+                model: fallbackModel
+            };
+        } catch (fallbackError) {
+            throw new AiModerationFallbackError(options.model, primaryError, fallbackModel, fallbackError);
+        }
+    }
+};
 
 const evaluate = async ({
     target,
@@ -1747,6 +1872,7 @@ const evaluate = async ({
             apiUrl: options.apiUrl,
             apiFormat: options.apiFormat,
             model: options.model,
+            fallbackModel: options.fallbackModel,
             promptHash,
             target: modelTarget,
             communityContext
@@ -1757,9 +1883,9 @@ const evaluate = async ({
         return cached;
     }
 
-    const cachedVerdict = await getCachedVerdictFromJson(options.cachePath, cacheKey);
-    if (cachedVerdict) {
-        const cachedPromise = Promise.resolve(cachedVerdict);
+    const cachedEntry = await getCachedVerdictFromJson(options.cachePath, cacheKey);
+    if (cachedEntry) {
+        const cachedPromise = Promise.resolve(cachedEntry.verdict);
         addCachedPromise(cacheKey, cachedPromise);
         await writeAuditLogEntry({
             auditLogPath: options.auditLogPath,
@@ -1770,41 +1896,46 @@ const evaluate = async ({
                 promptHash,
                 communityContext,
                 target,
-                verdict: cachedVerdict
+                verdict: cachedEntry.verdict,
+                providerModel: cachedEntry.providerModel
             })
         });
-        return cachedVerdict;
+        return cachedEntry.verdict;
     }
 
-    const promise = requestProviderVerdict({
+    const promise = requestProviderVerdictWithFallback({
         options,
         apiKey,
         systemPrompt,
         communityContext,
         target: modelTarget
     })
-        .then(async (rawVerdict) => {
-            let finalRawVerdict = rawVerdict;
-            if (isUnsupportedDuplicateReview(rawVerdict, target, communityContext)) {
+        .then(async (providerResult) => {
+            let finalRawVerdict = providerResult.verdict;
+            let providerModel = providerResult.model;
+            if (isUnsupportedDuplicateReview(providerResult.verdict, target, communityContext)) {
                 const ruleOnlyCommunityContext = withoutDuplicateCheck(communityContext);
-                finalRawVerdict = await requestProviderVerdict({
+                const retryResult = await requestProviderVerdictWithFallback({
                     options,
                     apiKey,
                     systemPrompt: getSystemPrompt(baseSystemPrompt, ruleOnlyCommunityContext, target),
                     communityContext: ruleOnlyCommunityContext,
                     target: modelTarget
                 });
+                finalRawVerdict = retryResult.verdict;
+                providerModel = retryResult.model;
                 if (isUnsupportedDuplicateReview(finalRawVerdict, target, ruleOnlyCommunityContext)) {
                     throw new Error("AI moderation duplicate review lacked recent-post evidence");
                 }
             } else {
-                finalRawVerdict = normalizeDuplicateReview(rawVerdict, target, communityContext);
+                finalRawVerdict = normalizeDuplicateReview(providerResult.verdict, target, communityContext);
             }
             const verdict = sanitizeVerdict(finalRawVerdict, target);
             await setCachedVerdictInJson({
                 cachePath: options.cachePath,
                 cacheKey,
-                verdict
+                verdict,
+                providerModel
             });
             await writeAuditLogEntry({
                 auditLogPath: options.auditLogPath,
@@ -1815,7 +1946,8 @@ const evaluate = async ({
                     promptHash,
                     communityContext,
                     target,
-                    verdict: finalRawVerdict
+                    verdict: finalRawVerdict,
+                    providerModel
                 })
             });
             return verdict;
@@ -1888,7 +2020,14 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
             communityContext
         );
     } catch (error) {
-        return getFallbackResult(moderationTarget.kind, options, error);
+        return getFallbackResult({
+            kind: moderationTarget.kind,
+            options,
+            error,
+            pendingApproval: args.challengeSettings.pendingApproval === true,
+            targetKind: moderationTarget.target.kind,
+            communityContext
+        });
     }
 };
 

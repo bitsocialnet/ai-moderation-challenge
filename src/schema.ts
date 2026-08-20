@@ -26,6 +26,7 @@ export type ParsedOptions = {
     apiFormat: ApiFormat;
     apiKey?: string;
     model: string;
+    fallbackModel?: string;
     branch: Branch;
     prompt?: string;
     promptPath?: string;
@@ -128,6 +129,7 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
             }, ApiFormatSchema),
             apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
             model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
+            fallbackModel: z.preprocess((value) => resolveOptionalOptionString(value, "fallbackModel"), z.string().optional()),
             branch: z.preprocess((value) => {
                 const resolved = resolveOptionString(value, "branch");
                 return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
