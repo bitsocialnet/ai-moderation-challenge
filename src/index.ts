@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -153,7 +154,7 @@ const optionInputs = [
         option: "apiKey",
         label: "API key",
         default: "",
-        description: "Private provider API key",
+        description: "Private provider API key; leave empty for self-hosted endpoints that do not require one",
         placeholder: "sk-..."
     },
     {
@@ -1261,14 +1262,6 @@ const getBranchResult = (
     return { success: false, error: reason || "AI moderation branch did not match." };
 };
 
-const getApiKey = (options: ParsedOptions) => {
-    const apiKey = options.apiKey;
-    if (!apiKey) {
-        throw new Error("AI moderation API key is not configured in challenge options");
-    }
-    return apiKey;
-};
-
 const emitWarningOnce = (code: string, message: string) => {
     if (emittedWarningCodes.has(code)) return;
     emittedWarningCodes.add(code);
@@ -1448,7 +1441,7 @@ const loadSystemPrompt = async (options: ParsedOptions) => {
         if (options.promptUrl) {
             emitWarningOnce("BITSOCIAL_AI_MODERATION_PROMPT_PATH_PRECEDENCE", PROMPT_PATH_PRECEDENCE_WARNING);
         }
-        return readFile(options.promptPath, "utf8");
+        return readFile(expandPrivatePath(options.promptPath), "utf8");
     }
     if (options.promptUrl) return loadRemotePrompt(options);
     emitWarningOnce("BITSOCIAL_AI_MODERATION_PUBLIC_PROMPT", PUBLIC_FALLBACK_PROMPT_WARNING);
@@ -1561,12 +1554,13 @@ class AiModerationApiError extends Error {
     }
 }
 
-const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; apiKey: string; body: unknown }) => {
+const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; apiKey?: string; body: unknown }) => {
     log.trace(`POST ${options.apiUrl} request sent`);
+    // Self-hosted endpoints can run without a key; only send authorization when one is configured.
     const response = await fetch(options.apiUrl, {
         method: "POST",
         headers: {
-            authorization: `Bearer ${apiKey}`,
+            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
             "content-type": "application/json",
             accept: "application/json"
         },
@@ -1771,7 +1765,7 @@ const requestProviderVerdict = async ({
 }: {
     options: ParsedOptions;
     model?: string;
-    apiKey: string;
+    apiKey?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
@@ -1813,7 +1807,7 @@ const requestProviderVerdictWithFallback = async ({
     target
 }: {
     options: ParsedOptions;
-    apiKey: string;
+    apiKey?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
@@ -1864,7 +1858,7 @@ const evaluate = async ({
 }) => {
     const baseSystemPrompt = await loadSystemPrompt(options);
     const systemPrompt = getSystemPrompt(baseSystemPrompt, communityContext, target);
-    const apiKey = getApiKey(options);
+    const apiKey = options.apiKey;
     const promptHash = sha256(systemPrompt);
     const modelTarget = getModelPublicationTarget(target);
     const cacheKey = sha256(
@@ -2031,8 +2025,34 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
     }
 };
 
+// Publishing either of these in community.challenges[i].publicOptions hands out a credential; every other option is
+// private by default but legitimately publishable, so the owner decides.
+const NON_PUBLISHABLE_OPTIONS: ReadonlySet<string> = new Set(["apiKey", "promptBearerToken"]);
+
+// Runs on every community edit and start. Must stay sync and network-free: reject here only what the options
+// schema and static config relationships can prove, and leave provider reachability to getChallenge.
+const validateChallengeSettings: NonNullable<ChallengeFileInput["validateChallengeSettings"]> = ({ challengeSettings }) => {
+    const parsedOptions = parseOptions(challengeSettings);
+    if (!parsedOptions.success) {
+        throw new Error(parsedOptions.error);
+    }
+
+    // A missing prompt file is only logged: it may appear later, and a throw here would re-fail every start.
+    const promptPath = parsedOptions.data.promptPath;
+    if (promptPath && !existsSync(expandPrivatePath(promptPath))) {
+        log("configured promptPath does not exist on this node; moderation will fail closed until it does");
+    }
+
+    const publishedSecrets = (challengeSettings.publicOptions ?? []).filter((option) => NON_PUBLISHABLE_OPTIONS.has(option));
+    if (publishedSecrets.length > 0) {
+        throw new Error(
+            `Invalid challenge settings: ${publishedSecrets.join(", ")} must not be listed in publicOptions because it would publish a credential`
+        );
+    }
+};
+
 function ChallengeFileFactory(_communityChallengeSettings: GetChallengeArgs["challengeSettings"]): ChallengeFileInput {
-    return { getChallenge, optionInputs, type, description };
+    return { getChallenge, optionInputs, type, description, validateChallengeSettings };
 }
 
 export default ChallengeFileFactory;
