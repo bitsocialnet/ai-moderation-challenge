@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.13...v0.2.0) (2026-08-22)
+
+### Features
+
+* **challenge:** adopt validateChallengeSettings and allow keyless endpoints ([a1dd8d5](https://github.com/bitsocialnet/ai-moderation-challenge/commit/a1dd8d51372647a6f07dd10ab4d8c2357778c444)), closes [#12](https://github.com/bitsocialnet/ai-moderation-challenge/issues/12)
+
 ## [0.1.13](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.11...v0.1.13) (2026-08-20)
 
 ### Bug Fixes
