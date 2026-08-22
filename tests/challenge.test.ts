@@ -709,6 +709,31 @@ describe("Bitsocial AI moderation challenge package", () => {
         }
     });
 
+    it("expands ~ in promptPath to the home directory", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const tempHome = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-home-"));
+        await writeFile(join(tempHome, "prompt.md"), "home prompt", "utf8");
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const originalHome = process.env.HOME;
+        process.env.HOME = tempHome;
+
+        try {
+            const result = await challengeFile.getChallenge({
+                challengeSettings: settings({ promptPath: "~/prompt.md" }),
+                challengeRequestMessage: createCommentRequest("home prompt payload"),
+                challengeIndex: 1,
+                community
+            });
+
+            expect(result).toEqual({ success: true });
+            const input = getRequestBody(fetchMock).input as Array<{ role: string; content: string }>;
+            expect(input[0].content).toContain("home prompt");
+        } finally {
+            process.env.HOME = originalHome;
+            await rm(tempHome, { recursive: true, force: true });
+        }
+    });
+
     it("can fetch the private system prompt from an HTTPS URL with bearer auth", async () => {
         const fetchMock = stubFetch(
             createPromptResponse("# Remote moderation prompt\n\nReturn allow for this test."),
@@ -2032,30 +2057,22 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("routes comments to review when the API key is missing", async () => {
+    it("calls keyless self-hosted endpoints without an authorization header", async () => {
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
-        const request = createCommentRequest("missing key comment");
 
-        const allowResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", apiKey: "", branch: "allow" }),
-            challengeRequestMessage: request,
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "http://localhost:11434/v1/responses", apiKey: "", branch: "allow" }),
+            challengeRequestMessage: createCommentRequest("keyless endpoint comment"),
             challengeIndex: 1,
             community
         });
-        const reviewResult = await challengeFile.getChallenge({
-            challengeSettings: settings({ apiUrl: "https://provider.example/missing-key", apiKey: "", branch: "review" }),
-            challengeRequestMessage: request,
-            challengeIndex: 2,
-            community
-        });
 
-        expect(allowResult).toEqual({
-            success: false,
-            error: "AI moderation API key is not configured in challenge options"
-        });
-        expect(reviewResult).toEqual({ success: true });
-        expect(fetchMock).not.toHaveBeenCalled();
+        expect(result).toEqual({ success: true });
+        const [url, init] = getFetchCall(fetchMock);
+        expect(url).toBe("http://localhost:11434/v1/responses");
+        expect(init.headers).not.toHaveProperty("authorization");
+        expect(init.headers).toMatchObject({ "content-type": "application/json", accept: "application/json" });
     });
 
     it("returns safe failures for invalid options", async () => {
@@ -2167,5 +2184,61 @@ describe("Bitsocial AI moderation challenge package", () => {
         } finally {
             await rm(tempDir, { recursive: true, force: true });
         }
+    });
+});
+
+describe("validateChallengeSettings", () => {
+    const validate = (challengeSettings: CommunityChallengeSetting) => {
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        return () => challengeFile.validateChallengeSettings!({ challengeSettings });
+    };
+
+    it("accepts a valid configuration and leaves non-credential options publishable", () => {
+        expect(
+            validate({
+                ...settings({
+                    promptUrl: "https://prompt.example.com/prompt.md",
+                    promptBearerToken: "prompt-secret-token",
+                    rejectDuplicateMedia: "true"
+                }),
+                publicOptions: ["branch", "model", "prompt", "promptUrl", "rejectDuplicateMedia"]
+            })
+        ).not.toThrow();
+        expect(validate(settings({ apiKey: "" }))).not.toThrow();
+    });
+
+    it("rejects an apiUrl that is not http or https", () => {
+        expect(validate(settings({ apiUrl: "ftp://provider.example/v1" }))).toThrow(/API URL must use http or https/);
+        expect(validate(settings({ apiUrl: "not a url" }))).toThrow(/Invalid challenge options/);
+    });
+
+    it("rejects a promptUrl that is not https", () => {
+        expect(validate(settings({ promptUrl: "http://prompt.example.com/prompt.md" }))).toThrow(/Prompt URL must use https/);
+    });
+
+    it("rejects an unsupported apiFormat", () => {
+        expect(validate(settings({ apiFormat: "completions" }))).toThrow(/Invalid challenge options/);
+    });
+
+    it("rejects an unknown branch", () => {
+        expect(validate(settings({ branch: "reject" }))).toThrow(/Invalid challenge options/);
+    });
+
+    it("rejects a non-boolean rejectDuplicateMedia", () => {
+        expect(validate(settings({ rejectDuplicateMedia: "yes" }))).toThrow(/Invalid challenge options/);
+    });
+
+    it("logs instead of throwing when promptPath does not exist", () => {
+        expect(validate(settings({ promptPath: "/nonexistent/bitsocial-ai-moderation-prompt.md" }))).not.toThrow();
+    });
+
+    it("rejects publishing credentials through publicOptions", () => {
+        expect(validate({ ...settings(), publicOptions: ["apiKey"] })).toThrow(/apiKey must not be listed in publicOptions/);
+        expect(
+            validate({
+                ...settings({ promptUrl: "https://prompt.example.com/prompt.md", promptBearerToken: "prompt-secret-token" }),
+                publicOptions: ["branch", "promptBearerToken"]
+            })
+        ).toThrow(/promptBearerToken must not be listed in publicOptions/);
     });
 });

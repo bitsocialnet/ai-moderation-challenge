@@ -43,7 +43,7 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
 ];
 ```
 
-Challenge options are private community-node settings in `pkc-js`, so `apiKey`, `prompt`, `promptPath`, `promptUrl`, `promptBearerToken`, `apiUrl`, `cachePath`, and `auditLogPath` are not copied into the public community challenge metadata. Keep local settings backups private because they can contain provider keys or prompt access tokens.
+Challenge options are private community-node settings in `pkc-js`: nothing in `options` is copied into the public community challenge metadata unless the owner names it in `publicOptions` (see [Settings validation and public options](#settings-validation-and-public-options)). Keep local settings backups private because they can contain provider keys or prompt access tokens.
 
 Production operators should keep the real moderation prompt in a private node-local file referenced by `promptPath`, or in a private HTTPS endpoint referenced by `promptUrl` plus `promptBearerToken`. Do not commit production prompts to public repositories; the built-in prompt is only a public fallback and the challenge emits a warning when it is used.
 
@@ -53,12 +53,12 @@ Production operators should keep the real moderation prompt in a private node-lo
 | ---------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `apiUrl`               | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
 | `apiFormat`            | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
-| `apiKey`               | none                                     | Private provider API key                                                                                       |
+| `apiKey`               | none                                     | Private provider API key; leave empty for self-hosted endpoints that do not require one                        |
 | `model`                | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
 | `fallbackModel`        | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
 | `branch`               | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
 | `prompt`               | built-in prompt                          | Private inline system prompt text                                                                              |
-| `promptPath`           | none                                     | Private file path for a system prompt on the community node                                                    |
+| `promptPath`           | none                                     | Private file path for a system prompt on the community node; `~` expands to the home directory                 |
 | `promptUrl`            | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
 | `promptBearerToken`    | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
 | `cachePath`            | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
@@ -88,6 +88,25 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
 OpenAI-compatible APIs are a practical compatibility convention, not a formal open standard. Test custom providers before enabling the challenge on live communities.
 
 To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` on both the `allow` and `review` challenge entries. PKC challenge option values are strings; leaving this option unset preserves the default and does not perform the deterministic hard-rejection check.
+
+## Settings validation and public options
+
+`pkc-js` 0.0.85+ validates `community.settings.challenges[i]` on every community edit, creation, and start. For this challenge that means:
+
+- Option keys that are not listed in the table above are rejected as typos by `pkc-js` itself.
+- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown `apiFormat` or `branch`, a `rejectDuplicateMedia` value other than `true`/`false`, or an empty `model`. The hook is synchronous and never contacts the provider, so a missing or wrong `apiKey` is only discovered when a publication is moderated (fail closed).
+- If `promptPath` does not exist on the node, the hook logs it through `pkc-logger` but does not reject the settings, so a prompt file that is created later does not block the community.
+- Rejections fail the offending `community.edit()`; at start they surface as community `error` events with code `ERR_CHALLENGE_SETTINGS_VALIDATION_FAILED` and the community still starts. Existing settings that were silently broken start emitting these errors after upgrading.
+
+Every option is private by default. An owner can publish specific options by naming them in `publicOptions`, and `pkc-js` then copies their values into the public `community.challenges[i].publicOptions`. The hook refuses to publish `apiKey` and `promptBearerToken` because they are credentials. Everything else is the owner's call: publishing `prompt`, `promptUrl`, or `promptPath` is a transparency choice, but it lets users read the moderation prompt and try to game it, and publishing `apiUrl`, `cachePath`, or `auditLogPath` reveals private node details. Most communities should leave `publicOptions` unset.
+
+```js
+{
+    name: "@bitsocial/ai-moderation-challenge",
+    options: { apiKey: "sk-...", branch: "allow", rejectDuplicateMedia: "true" },
+    publicOptions: ["branch", "rejectDuplicateMedia"]
+}
+```
 
 ## Behavior
 
