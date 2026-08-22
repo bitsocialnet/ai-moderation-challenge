@@ -94,7 +94,7 @@ To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` 
 `pkc-js` 0.0.85+ validates `community.settings.challenges[i]` on every community edit, creation, and start. For this challenge that means:
 
 - Option keys that are not listed in the table above are rejected as typos by `pkc-js` itself.
-- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown `apiFormat` or `branch`, a `rejectDuplicateMedia` value other than `true`/`false`, or an empty `model`. The hook is synchronous and never contacts the provider, so a missing or wrong `apiKey` is only discovered when a publication is moderated (fail closed).
+- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown `apiFormat` or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts the provider, so a missing or wrong `apiKey` is only discovered when a publication is moderated (fail closed).
 - If `promptPath` does not exist on the node, the hook logs it through `pkc-logger` but does not reject the settings, so a prompt file that is created later does not block the community.
 - Rejections fail the offending `community.edit()`; at start they surface as community `error` events with code `ERR_CHALLENGE_SETTINGS_VALIDATION_FAILED` and the community still starts. Existing settings that were silently broken start emitting these errors after upgrading.
 

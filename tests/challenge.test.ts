@@ -7,6 +7,11 @@ import type { LocalCommunity } from "@pkcprotocol/pkc-js/dist/node/runtime/node/
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ChallengeFileFactory from "../src/index.js";
 
+const { loggerMock } = vi.hoisted(() => ({
+    loggerMock: Object.assign(vi.fn(), { error: vi.fn(), trace: vi.fn() })
+}));
+vi.mock("@pkcprotocol/pkc-logger", () => ({ default: () => loggerMock }));
+
 type MockFetch = ReturnType<typeof vi.fn>;
 
 const createModelResponse = (verdict: unknown, status = 200) =>
@@ -2228,8 +2233,15 @@ describe("validateChallengeSettings", () => {
         expect(validate(settings({ rejectDuplicateMedia: "yes" }))).toThrow(/Invalid challenge options/);
     });
 
+    it("accepts an empty model because it falls back to the default model", () => {
+        expect(validate(settings({ model: "   " }))).not.toThrow();
+    });
+
     it("logs instead of throwing when promptPath does not exist", () => {
+        loggerMock.mockClear();
         expect(validate(settings({ promptPath: "/nonexistent/bitsocial-ai-moderation-prompt.md" }))).not.toThrow();
+        expect(loggerMock).toHaveBeenCalledWith(expect.stringContaining("promptPath does not exist"));
+        expect(loggerMock.mock.calls.flat().join(" ")).not.toContain("/nonexistent/");
     });
 
     it("rejects publishing credentials through publicOptions", () => {
