@@ -1254,7 +1254,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it("reserves an in-flight media URL without rejecting the second branch of the same publication", async () => {
+    it("reserves an in-flight media URL without rejecting later challenge rounds for the same signed publication", async () => {
         const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
         const targetTimestamp = 1_780_000_300;
@@ -1288,6 +1288,19 @@ describe("Bitsocial AI moderation challenge package", () => {
             challengeIndex: 2,
             community: reservationCommunity
         });
+        const sameSignedPublicationRetryResult = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation",
+                branch: "allow",
+                rejectDuplicateMedia: "true"
+            }),
+            challengeRequestMessage: createCommentRequest("first concurrent post", {
+                comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp },
+                request: { challengeRequestId: new Uint8Array([14, 15, 16, 17]) }
+            }),
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
         const competingResult = await challengeFile.getChallenge({
             challengeSettings: settings({
                 apiUrl: "https://provider.example/reservation",
@@ -1295,7 +1308,12 @@ describe("Bitsocial AI moderation challenge package", () => {
                 rejectDuplicateMedia: "true"
             }),
             challengeRequestMessage: createCommentRequest("second concurrent post", {
-                comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp + 1 },
+                comment: {
+                    link: mediaUrl,
+                    linkHtmlTagName: "img",
+                    signature: { publicKey: "signature-public-key-2", signature: "signature-value-2" },
+                    timestamp: targetTimestamp + 1
+                },
                 request: { challengeRequestId: new Uint8Array([20, 21, 22, 23]) }
             }),
             challengeIndex: 1,
@@ -1304,6 +1322,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         expect(allowResult).toEqual({ success: true });
         expect(samePublicationReviewResult).toEqual({ success: false, error: "AI moderation branch did not match." });
+        expect(sameSignedPublicationRetryResult).toEqual({ success: true });
         expect(competingResult).toEqual({ success: false, error: "This media was already posted recently." });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });

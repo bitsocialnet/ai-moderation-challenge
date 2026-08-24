@@ -1067,7 +1067,7 @@ const queryActiveMediaLinkRows = (db: SqliteDatabase, targetTimestamp: number) =
         .all(targetTimestamp)
         .filter(isActiveMediaLinkRow);
 
-const getDuplicateMediaPublicationIdentity = (target: PublicationTarget) => target.challengeRequestIdHash ?? target.signatureHash;
+const getDuplicateMediaPublicationIdentity = (target: PublicationTarget) => target.signatureHash ?? target.challengeRequestIdHash;
 
 const pruneExpiredDuplicateMediaReservations = (now: number) => {
     for (const [key, reservation] of duplicateMediaReservations) {
