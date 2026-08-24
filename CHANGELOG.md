@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.2.0...v0.2.1) (2026-08-24)
+
+### Bug Fixes
+
+* **duplicate media:** preserve identity across challenge rounds ([#14](https://github.com/bitsocialnet/ai-moderation-challenge/issues/14)) ([41000c5](https://github.com/bitsocialnet/ai-moderation-challenge/commit/41000c556c832f68b0d7db53c86f730a9b8289fe))
+
 ## [0.2.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.1.13...v0.2.0) (2026-08-22)
 
 ### Features
