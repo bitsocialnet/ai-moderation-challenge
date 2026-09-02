@@ -4,11 +4,11 @@
 
 ### Features
 
-* **challenge:** add two-stage moderation cascade ([#15](https://github.com/bitsocialnet/ai-moderation-challenge/issues/15)) ([3d153e6](https://github.com/bitsocialnet/ai-moderation-challenge/commit/3d153e618e6810cd2c5b574ca89850f7e0a3ceb6))
+- **challenge:** add two-stage moderation cascade ([#15](https://github.com/bitsocialnet/ai-moderation-challenge/issues/15)) ([3d153e6](https://github.com/bitsocialnet/ai-moderation-challenge/commit/3d153e618e6810cd2c5b574ca89850f7e0a3ceb6))
 
 ### Bug Fixes
 
-* **challenge:** time out stalled provider bodies ([#16](https://github.com/bitsocialnet/ai-moderation-challenge/issues/16)) ([b3f9ed8](https://github.com/bitsocialnet/ai-moderation-challenge/commit/b3f9ed86c59fd853dd7b0f53428824e476af370f))
+- **challenge:** time out stalled provider bodies ([#16](https://github.com/bitsocialnet/ai-moderation-challenge/issues/16)) ([b3f9ed8](https://github.com/bitsocialnet/ai-moderation-challenge/commit/b3f9ed86c59fd853dd7b0f53428824e476af370f))
 
 ## [0.2.1](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.2.0...v0.2.1) (2026-08-24)
 
