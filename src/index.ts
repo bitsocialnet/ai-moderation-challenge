@@ -1679,7 +1679,7 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
             body: JSON.stringify(body),
             signal: abortController.signal
         });
-        responseText = await response.text().catch(() => "");
+        responseText = await response.text();
     } finally {
         clearTimeout(timeout);
     }
