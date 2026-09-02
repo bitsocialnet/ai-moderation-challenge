@@ -1667,6 +1667,7 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
     const timeout = setTimeout(() => abortController.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
     timeout.unref?.();
     let response: Response;
+    let responseText: string;
     try {
         response = await fetch(provider.apiUrl, {
             method: "POST",
@@ -1678,11 +1679,11 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
             body: JSON.stringify(body),
             signal: abortController.signal
         });
+        responseText = await response.text();
     } finally {
         clearTimeout(timeout);
     }
 
-    const responseText = await response.text().catch(() => "");
     log.trace(`POST ${provider.apiUrl} response status: ${response.status}`);
 
     if (!response.ok) {

@@ -815,15 +815,19 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
     });
 
-    it("times out a stalled triage request and escalates to the primary reviewer", async () => {
+    it("times out a stalled triage response body and escalates to the primary reviewer", async () => {
         vi.useFakeTimers();
         const fetchMock = vi
             .fn()
-            .mockImplementationOnce(
-                (_url: string, init: RequestInit) =>
-                    new Promise<Response>((_resolve, reject) => {
-                        init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
-                    })
+            .mockImplementationOnce((_url: string, init: RequestInit) =>
+                Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    text: () =>
+                        new Promise<string>((_resolve, reject) => {
+                            init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+                        })
+                } as Response)
             )
             .mockResolvedValueOnce(createChatModelResponse({ verdict: "allow", reason: "no clear violation", matchedRuleIndexes: [] }));
         vi.stubGlobal("fetch", fetchMock);
@@ -852,6 +856,34 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(getFetchCall(fetchMock, 0)[0]).toBe("https://api.openai.com/v1/responses");
         expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
+    });
+
+    it("reports a stalled primary reviewer response body as an aborted request", async () => {
+        vi.useFakeTimers();
+        const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) =>
+            Promise.resolve({
+                ok: true,
+                status: 200,
+                text: () =>
+                    new Promise<string>((_resolve, reject) => {
+                        init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+                    })
+            } as Response)
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const resultPromise = challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/stalled-reviewer" }),
+            challengeRequestMessage: createCommentRequest("stalled reviewer payload"),
+            challengeIndex: 1,
+            community
+        });
+
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        await expect(resultPromise).resolves.toEqual({ success: false, error: "request aborted" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it("fails closed when triage requests review and the primary reviewer is unavailable", async () => {
