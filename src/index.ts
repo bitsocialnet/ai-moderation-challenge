@@ -42,6 +42,7 @@ const DUPLICATE_MEDIA_RESERVATION_TTL_MS = 2 * 60 * 1000;
 const DUPLICATE_MEDIA_ERROR = "This media was already posted recently.";
 const PROMPT_URL_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROMPT_URL_FETCH_TIMEOUT_MS = 5_000;
+const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_PROMPT_URL_BYTES = 64 * 1024;
 const MAX_REMOTE_PROMPT_CACHE_ENTRIES = 256;
 
@@ -758,7 +759,7 @@ const createAuditEntry = ({
     target,
     verdict,
     error,
-    providerModel = options.model,
+    providerModel,
     providerStage = "reviewer"
 }: {
     source: "provider" | "cache";
@@ -774,6 +775,7 @@ const createAuditEntry = ({
 }) => {
     const provider =
         providerStage === "triage" ? (getTriageProvider(options) ?? getReviewerProvider(options)) : getReviewerProvider(options);
+    const resolvedProviderModel = providerModel ?? provider.model;
     return {
         version: 1,
         loggedAt: new Date().toISOString(),
@@ -790,9 +792,9 @@ const createAuditEntry = ({
                 }
             })(),
             apiFormat: provider.apiFormat,
-            model: providerModel,
+            model: resolvedProviderModel,
             ...(provider.reasoningEffort ? { reasoningEffort: provider.reasoningEffort } : {}),
-            ...(provider.stage === "reviewer" && providerModel !== provider.model ? { fallbackFromModel: provider.model } : {})
+            ...(provider.stage === "reviewer" && resolvedProviderModel !== provider.model ? { fallbackFromModel: provider.model } : {})
         },
         promptHash,
         community: {
@@ -1655,17 +1657,30 @@ class AiModerationApiError extends Error {
 }
 
 const postJson = async ({ provider, body }: { provider: ProviderConfig; body: unknown }) => {
+    if (provider.apiKey && new URL(provider.apiUrl).protocol !== "https:") {
+        throw new Error("AI moderation API URL must use https when an API key is configured");
+    }
+
     log.trace(`POST ${provider.apiUrl} request sent`);
     // Self-hosted endpoints can run without a key; only send authorization when one is configured.
-    const response = await fetch(provider.apiUrl, {
-        method: "POST",
-        headers: {
-            ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
-            "content-type": "application/json",
-            accept: "application/json"
-        },
-        body: JSON.stringify(body)
-    });
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+    timeout.unref?.();
+    let response: Response;
+    try {
+        response = await fetch(provider.apiUrl, {
+            method: "POST",
+            headers: {
+                ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
+                "content-type": "application/json",
+                accept: "application/json"
+            },
+            body: JSON.stringify(body),
+            signal: abortController.signal
+        });
+    } finally {
+        clearTimeout(timeout);
+    }
 
     const responseText = await response.text().catch(() => "");
     log.trace(`POST ${provider.apiUrl} response status: ${response.status}`);

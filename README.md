@@ -105,6 +105,7 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
 ```
 
 OpenAI-compatible APIs are a practical compatibility convention, not a formal open standard. Test custom providers before enabling the challenge on live communities.
+Provider API keys are only sent to HTTPS endpoints. Keyless HTTP endpoints remain available for trusted local or self-hosted deployments.
 
 To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` on both the `allow` and `review` challenge entries. PKC challenge option values are strings; leaving this option unset preserves the default and does not perform the deterministic hard-rejection check.
 
@@ -113,7 +114,7 @@ To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` 
 `pkc-js` 0.0.85+ validates `community.settings.challenges[i]` on every community edit, creation, and start. For this challenge that means:
 
 - Option keys that are not listed in the table above are rejected as typos by `pkc-js` itself.
-- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` or `triageApiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown API format, reasoning effort, or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts a provider, so a missing or wrong API key is only discovered when a publication is moderated (fail closed).
+- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` or `triageApiUrl` that is not `http`/`https`, a keyed provider URL that is not HTTPS, a `promptUrl` that is not `https`, an unknown API format, reasoning effort, or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts a provider, so a missing or wrong API key is only discovered when a publication is moderated (fail closed).
 - If `promptPath` does not exist on the node, the hook logs it through `pkc-logger` but does not reject the settings, so a prompt file that is created later does not block the community.
 - Rejections fail the offending `community.edit()`; at start they surface as community `error` events with code `ERR_CHALLENGE_SETTINGS_VALIDATION_FAILED` and the community still starts. Existing settings that were silently broken start emitting these errors after upgrading.
 
@@ -133,6 +134,7 @@ Every option is private by default. An owner can publish specific options by nam
 - New comments with verdict `review` are sent to pending approval with the redacted model reason attached for the author.
 - New comments are also sent to pending approval if the model API is unavailable.
 - When `triageModel` is configured, its `allow` verdict is final and avoids a primary-model call. A triage `review` verdict or triage-provider failure calls the primary reviewer, and only that reviewer's verdict can send content to pending approval.
+- Each provider request times out after 30 seconds. A triage timeout escalates to the primary reviewer; a primary-reviewer timeout follows the same fail-closed path as other provider failures.
 - When `fallbackModel` is configured, an HTTP 429 from the primary model is retried once with the fallback model before the publication is sent to pending approval.
 - Comments sent to pending approval because moderation is unavailable include a generic moderator-visible reason; provider details remain in the private audit log.
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.

@@ -815,6 +815,45 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
     });
 
+    it("times out a stalled triage request and escalates to the primary reviewer", async () => {
+        vi.useFakeTimers();
+        const fetchMock = vi
+            .fn()
+            .mockImplementationOnce(
+                (_url: string, init: RequestInit) =>
+                    new Promise<Response>((_resolve, reject) => {
+                        init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+                    })
+            )
+            .mockResolvedValueOnce(createChatModelResponse({ verdict: "allow", reason: "no clear violation", matchedRuleIndexes: [] }));
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        const resultPromise = challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://api.x.ai/v1/chat/completions",
+                apiFormat: "chat-completions",
+                apiKey: "xai-key",
+                model: "grok-4.6",
+                reasoningEffort: "high",
+                triageApiUrl: "https://api.openai.com/v1/responses",
+                triageApiKey: "openai-key",
+                triageModel: "gpt-5.6-luna",
+                triageReasoningEffort: "none"
+            }),
+            challengeRequestMessage: createCommentRequest("stalled triage payload"),
+            challengeIndex: 1,
+            community
+        });
+
+        await vi.advanceTimersByTimeAsync(30_000);
+
+        await expect(resultPromise).resolves.toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(getFetchCall(fetchMock, 0)[0]).toBe("https://api.openai.com/v1/responses");
+        expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
+    });
+
     it("fails closed when triage requests review and the primary reviewer is unavailable", async () => {
         const fetchMock = stubFetch(
             createModelResponse({ verdict: "review", reason: "possible violation", matchedRuleIndexes: [0] }),
@@ -858,6 +897,72 @@ describe("Bitsocial AI moderation challenge package", () => {
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("retains the triage model identity when cached provider metadata omits the model", async () => {
+        const tempDir = await mkdtemp(join(tmpdir(), "bitsocial-ai-moderation-triage-cache-"));
+        const cachePath = join(tempDir, "cache.json");
+        const auditLogPath = join(tempDir, "audit.jsonl");
+        const options = {
+            apiUrl: "https://api.x.ai/v1/chat/completions",
+            apiFormat: "chat-completions",
+            apiKey: "xai-key",
+            model: "grok-4.6",
+            reasoningEffort: "high",
+            triageApiUrl: "https://api.openai.com/v1/responses",
+            triageApiKey: "openai-key",
+            triageModel: "gpt-5.6-luna",
+            triageReasoningEffort: "none",
+            cachePath,
+            auditLogPath
+        };
+        const request = createCommentRequest("triage cache identity payload");
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "no clear violation", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+
+        try {
+            await challengeFile.getChallenge({
+                challengeSettings: settings(options),
+                challengeRequestMessage: request,
+                challengeIndex: 1,
+                community
+            });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            const cacheFile = JSON.parse(await readFile(cachePath, "utf8")) as {
+                entries: Record<string, Record<string, unknown>>;
+            };
+            const [cacheEntry] = Object.values(cacheFile.entries);
+            delete cacheEntry.providerModel;
+            await writeFile(cachePath, `${JSON.stringify(cacheFile, null, 2)}\n`, "utf8");
+
+            vi.resetModules();
+            const freshFetchMock = vi.fn().mockRejectedValue(new Error("should not call provider"));
+            vi.stubGlobal("fetch", freshFetchMock);
+            const { default: FreshChallengeFileFactory } = await import("../src/index.js");
+            const freshChallengeFile = FreshChallengeFileFactory({} as CommunityChallengeSetting);
+            await freshChallengeFile.getChallenge({
+                challengeSettings: settings(options),
+                challengeRequestMessage: request,
+                challengeIndex: 1,
+                community
+            });
+
+            expect(freshFetchMock).not.toHaveBeenCalled();
+            const auditEntries = (await readFile(auditLogPath, "utf8"))
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line) as Record<string, unknown>);
+            expect(auditEntries.at(-1)).toMatchObject({
+                source: "cache",
+                provider: {
+                    stage: "triage",
+                    model: "gpt-5.6-luna"
+                }
+            });
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
     });
 
     it("can read the private system prompt from a node-local file", async () => {
@@ -2409,6 +2514,22 @@ describe("validateChallengeSettings", () => {
     it("rejects an apiUrl that is not http or https", () => {
         expect(validate(settings({ apiUrl: "ftp://provider.example/v1" }))).toThrow(/API URL must use http or https/);
         expect(validate(settings({ apiUrl: "not a url" }))).toThrow(/Invalid challenge options/);
+    });
+
+    it("rejects keyed HTTP providers while allowing keyless HTTP endpoints", () => {
+        expect(validate(settings({ apiUrl: "http://provider.example/v1", apiKey: "secret" }))).toThrow(
+            /API URL must use https when an API key is configured/
+        );
+        expect(
+            validate(
+                settings({
+                    triageApiUrl: "http://provider.example/v1",
+                    triageApiKey: "triage-secret",
+                    triageModel: "triage-model"
+                })
+            )
+        ).toThrow(/Triage API URL must use https when a triage API key is configured/);
+        expect(validate(settings({ apiUrl: "http://localhost:8080/v1", apiKey: "" }))).not.toThrow();
     });
 
     it("rejects a promptUrl that is not https", () => {
