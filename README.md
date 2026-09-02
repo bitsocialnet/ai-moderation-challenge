@@ -20,8 +20,14 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
     {
         name: "@bitsocial/ai-moderation-challenge",
         options: {
-            apiKey: "sk-...",
-            fallbackModel: "grok-4.5",
+            apiUrl: "https://api.x.ai/v1/chat/completions",
+            apiFormat: "chat-completions",
+            apiKey: "xai-...",
+            model: "grok-4.6",
+            reasoningEffort: "high",
+            triageApiKey: "sk-...",
+            triageModel: "gpt-5.6-luna",
+            triageReasoningEffort: "none",
             branch: "allow",
             promptUrl: "https://prompt.example.com/v1/prompts/ai-moderation.md",
             promptBearerToken: "shared-secret-token"
@@ -31,8 +37,14 @@ Install this challenge twice: one `allow` branch and one `review` branch. The `r
     {
         name: "@bitsocial/ai-moderation-challenge",
         options: {
-            apiKey: "sk-...",
-            fallbackModel: "grok-4.5",
+            apiUrl: "https://api.x.ai/v1/chat/completions",
+            apiFormat: "chat-completions",
+            apiKey: "xai-...",
+            model: "grok-4.6",
+            reasoningEffort: "high",
+            triageApiKey: "sk-...",
+            triageModel: "gpt-5.6-luna",
+            triageReasoningEffort: "none",
             branch: "review",
             promptUrl: "https://prompt.example.com/v1/prompts/ai-moderation.md",
             promptBearerToken: "shared-secret-token"
@@ -49,22 +61,28 @@ Production operators should keep the real moderation prompt in a private node-lo
 
 ## Options
 
-| Option                 | Default                                  | Description                                                                                                    |
-| ---------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `apiUrl`               | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
-| `apiFormat`            | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
-| `apiKey`               | none                                     | Private provider API key; leave empty for self-hosted endpoints that do not require one                        |
-| `model`                | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
-| `fallbackModel`        | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
-| `branch`               | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
-| `prompt`               | built-in prompt                          | Private inline system prompt text                                                                              |
-| `promptPath`           | none                                     | Private file path for a system prompt on the community node; `~` expands to the home directory                 |
-| `promptUrl`            | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
-| `promptBearerToken`    | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
-| `cachePath`            | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
-| `auditLogPath`         | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
-| `rejectDuplicateMedia` | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
-| `error`                | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
+| Option                  | Default                                  | Description                                                                                                    |
+| ----------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `apiUrl`                | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
+| `apiFormat`             | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
+| `apiKey`                | none                                     | Private provider API key; leave empty for self-hosted endpoints that do not require one                        |
+| `model`                 | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
+| `fallbackModel`         | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
+| `reasoningEffort`       | none                                     | Optional primary-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                    |
+| `triageApiUrl`          | `https://api.openai.com/v1/responses`    | Full endpoint URL for the optional first-pass triage model                                                     |
+| `triageApiFormat`       | `responses`                              | Triage request/response format: `responses` or `chat-completions`                                              |
+| `triageApiKey`          | none                                     | Private triage-provider API key                                                                                |
+| `triageModel`           | none                                     | Optional first-pass model; setting it enables the two-stage cascade                                            |
+| `triageReasoningEffort` | none                                     | Optional triage-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                     |
+| `branch`                | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
+| `prompt`                | built-in prompt                          | Private inline system prompt text                                                                              |
+| `promptPath`            | none                                     | Private file path for a system prompt on the community node; `~` expands to the home directory                 |
+| `promptUrl`             | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
+| `promptBearerToken`     | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
+| `cachePath`             | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
+| `auditLogPath`          | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
+| `rejectDuplicateMedia`  | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
+| `error`                 | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
 
 Prompt source precedence is `prompt` > `promptPath` > `promptUrl` > built-in fallback. If multiple private prompt sources are configured, the challenge uses the highest-precedence source and emits a warning about the ignored source.
 
@@ -80,7 +98,8 @@ For providers exposing the chat-completions API shape, set both `apiFormat` and 
         apiFormat: "chat-completions",
         apiUrl: "https://provider.example/v1/chat/completions",
         apiKey: "provider-key",
-        model: "provider-model"
+        model: "provider-model",
+        reasoningEffort: "high"
     }
 }
 ```
@@ -94,11 +113,11 @@ To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` 
 `pkc-js` 0.0.85+ validates `community.settings.challenges[i]` on every community edit, creation, and start. For this challenge that means:
 
 - Option keys that are not listed in the table above are rejected as typos by `pkc-js` itself.
-- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown `apiFormat` or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts the provider, so a missing or wrong `apiKey` is only discovered when a publication is moderated (fail closed).
+- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` or `triageApiUrl` that is not `http`/`https`, a `promptUrl` that is not `https`, an unknown API format, reasoning effort, or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts a provider, so a missing or wrong API key is only discovered when a publication is moderated (fail closed).
 - If `promptPath` does not exist on the node, the hook logs it through `pkc-logger` but does not reject the settings, so a prompt file that is created later does not block the community.
 - Rejections fail the offending `community.edit()`; at start they surface as community `error` events with code `ERR_CHALLENGE_SETTINGS_VALIDATION_FAILED` and the community still starts. Existing settings that were silently broken start emitting these errors after upgrading.
 
-Every option is private by default. An owner can publish specific options by naming them in `publicOptions`, and `pkc-js` then copies their values into the public `community.challenges[i].publicOptions`. The hook refuses to publish `apiKey` and `promptBearerToken` because they are credentials. Everything else is the owner's call: publishing `prompt`, `promptUrl`, or `promptPath` is a transparency choice, but it lets users read the moderation prompt and try to game it, and publishing `apiUrl`, `cachePath`, or `auditLogPath` reveals private node details. Most communities should leave `publicOptions` unset.
+Every option is private by default. An owner can publish specific options by naming them in `publicOptions`, and `pkc-js` then copies their values into the public `community.challenges[i].publicOptions`. The hook refuses to publish `apiKey`, `triageApiKey`, and `promptBearerToken` because they are credentials. Everything else is the owner's call: publishing `prompt`, `promptUrl`, or `promptPath` is a transparency choice, but it lets users read the moderation prompt and try to game it, and publishing provider URLs, `cachePath`, or `auditLogPath` reveals private node details. Most communities should leave `publicOptions` unset.
 
 ```js
 {
@@ -113,6 +132,7 @@ Every option is private by default. An owner can publish specific options by nam
 - New comments with verdict `allow` publish normally.
 - New comments with verdict `review` are sent to pending approval with the redacted model reason attached for the author.
 - New comments are also sent to pending approval if the model API is unavailable.
+- When `triageModel` is configured, its `allow` verdict is final and avoids a primary-model call. A triage `review` verdict or triage-provider failure calls the primary reviewer, and only that reviewer's verdict can send content to pending approval.
 - When `fallbackModel` is configured, an HTTP 429 from the primary model is retried once with the fallback model before the publication is sent to pending approval.
 - Comments sent to pending approval because moderation is unavailable include a generic moderator-visible reason; provider details remain in the private audit log.
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
@@ -124,8 +144,8 @@ Every option is private by default. An owner can publish specific options by nam
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.
 - Remote prompts are fetched without following redirects, with a 5 second timeout, capped at 64 KiB, cached in memory for 5 minutes, and reused from the last in-memory copy if a refresh fails. If the first remote prompt fetch fails, moderation fails closed for the allow branch.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
-- Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API key.
-- Verdicts are written to a private JSONL audit log with the model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt, API key, prompt URL, or prompt bearer token.
+- Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over primary and triage model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API keys.
+- Verdicts are written to a private JSONL audit log with the model stage, model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt, API keys, prompt URL, or prompt bearer token.
 
 ## Moderation Audit Community
 
@@ -145,7 +165,7 @@ The publisher creates a persistent local signer at `~/.bitsocial-ai-moderation-m
 
 The coverage badge reports line coverage generated with `yarn test:coverage`. On pushes to `master`, CI writes a Shields-compatible endpoint payload and publishes it to GitHub Pages.
 
-The test suite covers the moderation-critical flow: OpenAI-compatible Responses and chat-completions requests include `community.rules`, model `review` verdicts fail the `allow` branch and pass the `review` branch used with `pendingApproval`, provider outages and malformed responses route new comments to review, and content edits are rejected on review or outage.
+The test suite covers the moderation-critical flow: OpenAI-compatible Responses and chat-completions requests include `community.rules`, triage approvals avoid the primary reviewer, triage reviews and outages escalate, model `review` verdicts fail the `allow` branch and pass the `review` branch used with `pendingApproval`, provider outages and malformed responses route new comments to review, and content edits are rejected on review or outage.
 
 ## Publishing
 

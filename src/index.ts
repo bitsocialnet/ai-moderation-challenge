@@ -18,8 +18,10 @@ import {
     DEFAULT_MODEL,
     ModelVerdictSchema,
     createOptionsSchema,
+    type ApiFormat,
     type ModelVerdict,
-    type ParsedOptions
+    type ParsedOptions,
+    type ReasoningEffort
 } from "./schema.js";
 
 const log = Logger("bitsocial:community:challenge:ai-moderation");
@@ -170,6 +172,48 @@ const optionInputs = [
         default: "",
         description: "Secondary model used when the primary model returns HTTP 429",
         placeholder: "grok-4.5"
+    },
+    {
+        option: "reasoningEffort",
+        label: "Reasoning effort",
+        default: "",
+        description: "Optional reasoning effort for the primary model",
+        placeholder: "high"
+    },
+    {
+        option: "triageApiUrl",
+        label: "Triage API URL",
+        default: DEFAULT_API_URL,
+        description: "API endpoint for the optional first-pass triage model",
+        placeholder: DEFAULT_API_URL
+    },
+    {
+        option: "triageApiFormat",
+        label: "Triage API format",
+        default: "responses",
+        description: "Request format for the optional triage model: responses or chat-completions",
+        placeholder: "responses"
+    },
+    {
+        option: "triageApiKey",
+        label: "Triage API key",
+        default: "",
+        description: "Private API key for the optional triage provider",
+        placeholder: "sk-..."
+    },
+    {
+        option: "triageModel",
+        label: "Triage model",
+        default: "",
+        description: "Optional first-pass model; allow verdicts skip the primary model and review verdicts escalate",
+        placeholder: "gpt-5.6-luna"
+    },
+    {
+        option: "triageReasoningEffort",
+        label: "Triage reasoning effort",
+        default: "",
+        description: "Optional reasoning effort for the triage model",
+        placeholder: "none"
     },
     {
         option: "branch",
@@ -355,6 +399,7 @@ type JsonCacheEntry = {
     cachedAt: number;
     verdict: ModelVerdict;
     providerModel?: string;
+    providerStage?: ProviderStage;
 };
 
 type JsonCacheFile = {
@@ -373,6 +418,40 @@ const auditLogWrites = new Map<string, Promise<void>>();
 const duplicateMediaReservations = new Map<string, DuplicateMediaReservation>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+type ProviderStage = "triage" | "reviewer";
+
+type ProviderConfig = {
+    stage: ProviderStage;
+    apiUrl: string;
+    apiFormat: ApiFormat;
+    apiKey?: string;
+    model: string;
+    fallbackModel?: string;
+    reasoningEffort?: ReasoningEffort;
+};
+
+const getReviewerProvider = (options: ParsedOptions): ProviderConfig => ({
+    stage: "reviewer",
+    apiUrl: options.apiUrl,
+    apiFormat: options.apiFormat,
+    apiKey: options.apiKey,
+    model: options.model,
+    fallbackModel: options.fallbackModel,
+    reasoningEffort: options.reasoningEffort
+});
+
+const getTriageProvider = (options: ParsedOptions): ProviderConfig | undefined =>
+    options.triageModel
+        ? {
+              stage: "triage",
+              apiUrl: options.triageApiUrl,
+              apiFormat: options.triageApiFormat,
+              apiKey: options.triageApiKey,
+              model: options.triageModel,
+              reasoningEffort: options.triageReasoningEffort
+          }
+        : undefined;
 
 const isRuntimeCommunity = (value: unknown): value is RuntimeCommunity =>
     isRecord(value) && ("address" in value || "rules" in value || "title" in value || "description" in value || "_dbHandler" in value);
@@ -449,7 +528,8 @@ const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
         acc[key] = {
             cachedAt: entry.cachedAt,
             verdict: verdict.data,
-            ...(typeof entry.providerModel === "string" ? { providerModel: entry.providerModel } : {})
+            ...(typeof entry.providerModel === "string" ? { providerModel: entry.providerModel } : {}),
+            ...(entry.providerStage === "triage" || entry.providerStage === "reviewer" ? { providerStage: entry.providerStage } : {})
         };
         return acc;
     }, {});
@@ -486,19 +566,22 @@ const writeJsonCache = async ({
     cachePath,
     cacheKey,
     verdict,
-    providerModel
+    providerModel,
+    providerStage
 }: {
     cachePath: string;
     cacheKey: string;
     verdict: ModelVerdict;
     providerModel: string;
+    providerStage: ProviderStage;
 }) => {
     const resolvedCachePath = expandPrivatePath(cachePath);
     const cache = await readJsonCache(cachePath);
     cache.entries[cacheKey] = {
         cachedAt: Date.now(),
         verdict,
-        providerModel
+        providerModel,
+        providerStage
     };
     cache.entries = pruneJsonCacheEntries(cache.entries);
 
@@ -675,7 +758,8 @@ const createAuditEntry = ({
     target,
     verdict,
     error,
-    providerModel = options.model
+    providerModel = options.model,
+    providerStage = "reviewer"
 }: {
     source: "provider" | "cache";
     cacheKey: string;
@@ -686,61 +770,68 @@ const createAuditEntry = ({
     verdict?: ModelVerdict;
     error?: unknown;
     providerModel?: string;
-}) => ({
-    version: 1,
-    loggedAt: new Date().toISOString(),
-    source,
-    action: verdict ? (verdict.verdict === "allow" ? "approved" : "queued_for_review") : "moderation_error",
-    cacheKey,
-    provider: {
-        apiHost: (() => {
-            try {
-                return new URL(options.apiUrl).hostname;
-            } catch {
-                return undefined;
-            }
-        })(),
-        apiFormat: options.apiFormat,
-        model: providerModel,
-        ...(providerModel !== options.model ? { fallbackFromModel: options.model } : {})
-    },
-    promptHash,
-    community: {
-        address: communityContext.address,
-        title: communityContext.title,
-        ruleCount: communityContext.rules.length,
-        rulesHash: sha256(stableStringify(communityContext.rules))
-    },
-    publication: {
-        kind: target.kind,
-        content: target.content,
-        contentHash: optionalHash(target.content),
-        title: target.title,
-        titleHash: optionalHash(target.title),
-        linkDomain: target.link?.domain,
-        linkUrl: target.link?.url,
-        linkUrlHash: optionalHash(target.link?.url),
-        linkHtmlTagName: target.link?.htmlTagName,
-        flags: target.flags,
-        flairs: target.flairs,
-        flairHashes: target.flairs.map(sha256),
-        parentCid: target.parentCid,
-        postCid: target.postCid,
-        commentCid: target.commentCid,
-        authorAddress: target.authorAddress,
-        authorPublicKey: target.authorPublicKey,
-        timestamp: target.timestamp,
-        signaturePublicKey: target.signaturePublicKey,
-        signatureHash: target.signatureHash,
-        challengeRequestIdHash: target.challengeRequestIdHash
-    },
-    ...(verdict ? { verdict } : {}),
-    ...(error
-        ? {
-              error: error instanceof Error ? error.message : "Unknown AI moderation error"
-          }
-        : {})
-});
+    providerStage?: ProviderStage;
+}) => {
+    const provider =
+        providerStage === "triage" ? (getTriageProvider(options) ?? getReviewerProvider(options)) : getReviewerProvider(options);
+    return {
+        version: 1,
+        loggedAt: new Date().toISOString(),
+        source,
+        action: verdict ? (verdict.verdict === "allow" ? "approved" : "queued_for_review") : "moderation_error",
+        cacheKey,
+        provider: {
+            stage: provider.stage,
+            apiHost: (() => {
+                try {
+                    return new URL(provider.apiUrl).hostname;
+                } catch {
+                    return undefined;
+                }
+            })(),
+            apiFormat: provider.apiFormat,
+            model: providerModel,
+            ...(provider.reasoningEffort ? { reasoningEffort: provider.reasoningEffort } : {}),
+            ...(provider.stage === "reviewer" && providerModel !== provider.model ? { fallbackFromModel: provider.model } : {})
+        },
+        promptHash,
+        community: {
+            address: communityContext.address,
+            title: communityContext.title,
+            ruleCount: communityContext.rules.length,
+            rulesHash: sha256(stableStringify(communityContext.rules))
+        },
+        publication: {
+            kind: target.kind,
+            content: target.content,
+            contentHash: optionalHash(target.content),
+            title: target.title,
+            titleHash: optionalHash(target.title),
+            linkDomain: target.link?.domain,
+            linkUrl: target.link?.url,
+            linkUrlHash: optionalHash(target.link?.url),
+            linkHtmlTagName: target.link?.htmlTagName,
+            flags: target.flags,
+            flairs: target.flairs,
+            flairHashes: target.flairs.map(sha256),
+            parentCid: target.parentCid,
+            postCid: target.postCid,
+            commentCid: target.commentCid,
+            authorAddress: target.authorAddress,
+            authorPublicKey: target.authorPublicKey,
+            timestamp: target.timestamp,
+            signaturePublicKey: target.signaturePublicKey,
+            signatureHash: target.signatureHash,
+            challengeRequestIdHash: target.challengeRequestIdHash
+        },
+        ...(verdict ? { verdict } : {}),
+        ...(error
+            ? {
+                  error: error instanceof Error ? error.message : "Unknown AI moderation error"
+              }
+            : {})
+    };
+};
 
 const appendAuditLog = async ({ auditLogPath, entry }: { auditLogPath: string; entry: unknown }) => {
     const resolvedAuditLogPath = expandPrivatePath(auditLogPath);
@@ -771,19 +862,21 @@ const setCachedVerdictInJson = async ({
     cachePath,
     cacheKey,
     verdict,
-    providerModel
+    providerModel,
+    providerStage
 }: {
     cachePath: string | undefined;
     cacheKey: string;
     verdict: ModelVerdict;
     providerModel: string;
+    providerStage: ProviderStage;
 }) => {
     if (!cachePath) return;
 
     const previousWrite = jsonCacheWrites.get(cachePath) ?? Promise.resolve();
     const nextWrite = previousWrite
         .catch(() => undefined)
-        .then(() => writeJsonCache({ cachePath, cacheKey, verdict, providerModel }))
+        .then(() => writeJsonCache({ cachePath, cacheKey, verdict, providerModel, providerStage }))
         .catch((error: unknown) => {
             const message = error instanceof Error ? error.message : "Unknown JSON cache write error";
             log.error("AI moderation JSON cache write failed: %s", message);
@@ -1459,17 +1552,20 @@ const createUserPromptPayload = (communityContext: CommunityContext, target: Mod
 
 const createResponsesRequestBody = ({
     model,
+    reasoningEffort,
     systemPrompt,
     communityContext,
     target
 }: {
     model: string;
+    reasoningEffort?: ReasoningEffort;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
 }) => ({
     model,
     store: false,
+    ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
     input: [
         {
             role: "system",
@@ -1492,16 +1588,19 @@ const createResponsesRequestBody = ({
 
 const createChatCompletionsRequestBody = ({
     model,
+    reasoningEffort,
     systemPrompt,
     communityContext,
     target
 }: {
     model: string;
+    reasoningEffort?: ReasoningEffort;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
 }) => ({
     model,
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     messages: [
         {
             role: "system",
@@ -1523,13 +1622,13 @@ const createChatCompletionsRequestBody = ({
 });
 
 const createModelRequestBody = ({
-    options,
-    model = options.model,
+    provider,
+    model = provider.model,
     systemPrompt,
     communityContext,
     target
 }: {
-    options: ParsedOptions;
+    provider: ProviderConfig;
     model?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
@@ -1537,11 +1636,12 @@ const createModelRequestBody = ({
 }) => {
     const props = {
         model,
+        reasoningEffort: provider.reasoningEffort,
         systemPrompt,
         communityContext,
         target
     };
-    return options.apiFormat === "chat-completions" ? createChatCompletionsRequestBody(props) : createResponsesRequestBody(props);
+    return provider.apiFormat === "chat-completions" ? createChatCompletionsRequestBody(props) : createResponsesRequestBody(props);
 };
 
 class AiModerationApiError extends Error {
@@ -1554,13 +1654,13 @@ class AiModerationApiError extends Error {
     }
 }
 
-const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; apiKey?: string; body: unknown }) => {
-    log.trace(`POST ${options.apiUrl} request sent`);
+const postJson = async ({ provider, body }: { provider: ProviderConfig; body: unknown }) => {
+    log.trace(`POST ${provider.apiUrl} request sent`);
     // Self-hosted endpoints can run without a key; only send authorization when one is configured.
-    const response = await fetch(options.apiUrl, {
+    const response = await fetch(provider.apiUrl, {
         method: "POST",
         headers: {
-            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+            ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
             "content-type": "application/json",
             accept: "application/json"
         },
@@ -1568,7 +1668,7 @@ const postJson = async ({ options, apiKey, body }: { options: ParsedOptions; api
     });
 
     const responseText = await response.text().catch(() => "");
-    log.trace(`POST ${options.apiUrl} response status: ${response.status}`);
+    log.trace(`POST ${provider.apiUrl} response status: ${response.status}`);
 
     if (!response.ok) {
         const details = responseText ? `: ${responseText}` : "";
@@ -1756,26 +1856,23 @@ const withoutDuplicateCheck = (communityContext: CommunityContext): CommunityCon
 };
 
 const requestProviderVerdict = async ({
-    options,
-    model = options.model,
-    apiKey,
+    provider,
+    model = provider.model,
     systemPrompt,
     communityContext,
     target
 }: {
-    options: ParsedOptions;
+    provider: ProviderConfig;
     model?: string;
-    apiKey?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
 }) =>
     parseModelResponse(
         await postJson({
-            options,
-            apiKey,
+            provider,
             body: createModelRequestBody({
-                options,
+                provider,
                 model,
                 systemPrompt,
                 communityContext,
@@ -1787,6 +1884,7 @@ const requestProviderVerdict = async ({
 type ProviderVerdict = {
     verdict: ModelVerdict;
     model: string;
+    stage: ProviderStage;
 };
 
 class AiModerationFallbackError extends Error {
@@ -1800,51 +1898,85 @@ class AiModerationFallbackError extends Error {
 }
 
 const requestProviderVerdictWithFallback = async ({
-    options,
-    apiKey,
+    provider,
     systemPrompt,
     communityContext,
     target
 }: {
-    options: ParsedOptions;
-    apiKey?: string;
+    provider: ProviderConfig;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
 }): Promise<ProviderVerdict> => {
     try {
         return {
-            verdict: await requestProviderVerdict({ options, apiKey, systemPrompt, communityContext, target }),
-            model: options.model
+            verdict: await requestProviderVerdict({ provider, systemPrompt, communityContext, target }),
+            model: provider.model,
+            stage: provider.stage
         };
     } catch (primaryError) {
-        const fallbackModel = options.fallbackModel;
+        const fallbackModel = provider.fallbackModel;
         if (
             !(primaryError instanceof AiModerationApiError) ||
             primaryError.status !== 429 ||
             !fallbackModel ||
-            fallbackModel === options.model
+            fallbackModel === provider.model
         ) {
             throw primaryError;
         }
 
-        log.trace("AI moderation model %s returned HTTP 429; retrying with fallback model %s", options.model, fallbackModel);
+        log.trace("AI moderation model %s returned HTTP 429; retrying with fallback model %s", provider.model, fallbackModel);
         try {
             return {
                 verdict: await requestProviderVerdict({
-                    options,
+                    provider,
                     model: fallbackModel,
-                    apiKey,
                     systemPrompt,
                     communityContext,
                     target
                 }),
-                model: fallbackModel
+                model: fallbackModel,
+                stage: provider.stage
             };
         } catch (fallbackError) {
-            throw new AiModerationFallbackError(options.model, primaryError, fallbackModel, fallbackError);
+            throw new AiModerationFallbackError(provider.model, primaryError, fallbackModel, fallbackError);
         }
     }
+};
+
+const requestCascadedVerdict = async ({
+    options,
+    systemPrompt,
+    communityContext,
+    target
+}: {
+    options: ParsedOptions;
+    systemPrompt: string;
+    communityContext: CommunityContext;
+    target: ModelPublicationTarget;
+}): Promise<ProviderVerdict> => {
+    const triageProvider = getTriageProvider(options);
+    if (triageProvider) {
+        try {
+            const triageResult = await requestProviderVerdictWithFallback({
+                provider: triageProvider,
+                systemPrompt,
+                communityContext,
+                target
+            });
+            if (triageResult.verdict.verdict === "allow") return triageResult;
+            log.trace("AI moderation triage model %s requested reviewer escalation", triageProvider.model);
+        } catch {
+            log.trace("AI moderation triage model %s failed; escalating to reviewer", triageProvider.model);
+        }
+    }
+
+    return requestProviderVerdictWithFallback({
+        provider: getReviewerProvider(options),
+        systemPrompt,
+        communityContext,
+        target
+    });
 };
 
 const evaluate = async ({
@@ -1858,7 +1990,6 @@ const evaluate = async ({
 }) => {
     const baseSystemPrompt = await loadSystemPrompt(options);
     const systemPrompt = getSystemPrompt(baseSystemPrompt, communityContext, target);
-    const apiKey = options.apiKey;
     const promptHash = sha256(systemPrompt);
     const modelTarget = getModelPublicationTarget(target);
     const cacheKey = sha256(
@@ -1867,6 +1998,15 @@ const evaluate = async ({
             apiFormat: options.apiFormat,
             model: options.model,
             fallbackModel: options.fallbackModel,
+            reasoningEffort: options.reasoningEffort,
+            triage: options.triageModel
+                ? {
+                      apiUrl: options.triageApiUrl,
+                      apiFormat: options.triageApiFormat,
+                      model: options.triageModel,
+                      reasoningEffort: options.triageReasoningEffort
+                  }
+                : undefined,
             promptHash,
             target: modelTarget,
             communityContext
@@ -1891,15 +2031,15 @@ const evaluate = async ({
                 communityContext,
                 target,
                 verdict: cachedEntry.verdict,
-                providerModel: cachedEntry.providerModel
+                providerModel: cachedEntry.providerModel,
+                providerStage: cachedEntry.providerStage
             })
         });
         return cachedEntry.verdict;
     }
 
-    const promise = requestProviderVerdictWithFallback({
+    const promise = requestCascadedVerdict({
         options,
-        apiKey,
         systemPrompt,
         communityContext,
         target: modelTarget
@@ -1907,17 +2047,18 @@ const evaluate = async ({
         .then(async (providerResult) => {
             let finalRawVerdict = providerResult.verdict;
             let providerModel = providerResult.model;
+            let providerStage = providerResult.stage;
             if (isUnsupportedDuplicateReview(providerResult.verdict, target, communityContext)) {
                 const ruleOnlyCommunityContext = withoutDuplicateCheck(communityContext);
                 const retryResult = await requestProviderVerdictWithFallback({
-                    options,
-                    apiKey,
+                    provider: getReviewerProvider(options),
                     systemPrompt: getSystemPrompt(baseSystemPrompt, ruleOnlyCommunityContext, target),
                     communityContext: ruleOnlyCommunityContext,
                     target: modelTarget
                 });
                 finalRawVerdict = retryResult.verdict;
                 providerModel = retryResult.model;
+                providerStage = retryResult.stage;
                 if (isUnsupportedDuplicateReview(finalRawVerdict, target, ruleOnlyCommunityContext)) {
                     throw new Error("AI moderation duplicate review lacked recent-post evidence");
                 }
@@ -1929,7 +2070,8 @@ const evaluate = async ({
                 cachePath: options.cachePath,
                 cacheKey,
                 verdict,
-                providerModel
+                providerModel,
+                providerStage
             });
             await writeAuditLogEntry({
                 auditLogPath: options.auditLogPath,
@@ -1941,7 +2083,8 @@ const evaluate = async ({
                     communityContext,
                     target,
                     verdict: finalRawVerdict,
-                    providerModel
+                    providerModel,
+                    providerStage
                 })
             });
             return verdict;
@@ -2027,7 +2170,7 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
 
 // Publishing either of these in community.challenges[i].publicOptions hands out a credential; every other option is
 // private by default but legitimately publishable, so the owner decides.
-const NON_PUBLISHABLE_OPTIONS: ReadonlySet<string> = new Set(["apiKey", "promptBearerToken"]);
+const NON_PUBLISHABLE_OPTIONS: ReadonlySet<string> = new Set(["apiKey", "triageApiKey", "promptBearerToken"]);
 
 // Runs on every community edit and start. Must stay sync and network-free: reject here only what the options
 // schema and static config relationships can prove, and leave provider reachability to getChallenge.
