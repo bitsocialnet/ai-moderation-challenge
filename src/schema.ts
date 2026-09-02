@@ -8,6 +8,7 @@ export const DEFAULT_ERROR = "Rejected by Bitsocial AI moderation.";
 
 export const BranchSchema = z.enum(["allow", "review"]);
 export const ApiFormatSchema = z.enum(["responses", "chat-completions"]);
+export const ReasoningEffortSchema = z.enum(["none", "low", "medium", "high", "xhigh", "max"]);
 
 export const ModelVerdictSchema = z
     .object({
@@ -19,6 +20,7 @@ export const ModelVerdictSchema = z
 
 export type Branch = z.infer<typeof BranchSchema>;
 export type ApiFormat = z.infer<typeof ApiFormatSchema>;
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 export type ModelVerdict = z.infer<typeof ModelVerdictSchema>;
 
 export type ParsedOptions = {
@@ -27,6 +29,12 @@ export type ParsedOptions = {
     apiKey?: string;
     model: string;
     fallbackModel?: string;
+    reasoningEffort?: ReasoningEffort;
+    triageApiUrl: string;
+    triageApiFormat: ApiFormat;
+    triageApiKey?: string;
+    triageModel?: string;
+    triageReasoningEffort?: ReasoningEffort;
     branch: Branch;
     prompt?: string;
     promptPath?: string;
@@ -113,53 +121,93 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
 
     const schema: z.ZodType<ParsedOptions> = z.preprocess(
         (value) => (value && typeof value === "object" ? value : {}),
-        z.object({
-            apiUrl: z.preprocess(
-                (value) => {
-                    const resolved = resolveOptionString(value, "apiUrl");
-                    return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
-                },
-                z.url().refine(isHttpUrl, {
-                    message: "API URL must use http or https"
-                })
-            ),
-            apiFormat: z.preprocess((value) => {
-                const resolved = resolveOptionString(value, "apiFormat");
-                return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
-            }, ApiFormatSchema),
-            apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
-            model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
-            fallbackModel: z.preprocess((value) => resolveOptionalOptionString(value, "fallbackModel"), z.string().optional()),
-            branch: z.preprocess((value) => {
-                const resolved = resolveOptionString(value, "branch");
-                return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
-            }, BranchSchema),
-            prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
-            promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
-            promptUrl: z.preprocess(
-                (value) => {
-                    const resolved = resolveOptionalOptionString(value, "promptUrl");
-                    return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
-                },
-                z
-                    .url()
-                    .refine(isHttpsUrl, {
-                        message: "Prompt URL must use https"
+        z
+            .object({
+                apiUrl: z.preprocess(
+                    (value) => {
+                        const resolved = resolveOptionString(value, "apiUrl");
+                        return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
+                    },
+                    z.url().refine(isHttpUrl, {
+                        message: "API URL must use http or https"
                     })
-                    .optional()
-            ),
-            promptBearerToken: z.preprocess((value) => resolveOptionalOptionString(value, "promptBearerToken"), z.string().optional()),
-            cachePath: z.preprocess(
-                (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
-                z.string().optional()
-            ),
-            auditLogPath: z.preprocess(
-                (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
-                z.string().optional()
-            ),
-            rejectDuplicateMedia: z.preprocess((value) => resolveOptionBoolean(value, "rejectDuplicateMedia"), z.boolean()),
-            error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
-        })
+                ),
+                apiFormat: z.preprocess((value) => {
+                    const resolved = resolveOptionString(value, "apiFormat");
+                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+                }, ApiFormatSchema),
+                apiKey: z.preprocess((value) => resolveOptionalOptionString(value, "apiKey"), z.string().optional()),
+                model: z.preprocess((value) => resolveOptionString(value, "model"), z.string().min(1)),
+                fallbackModel: z.preprocess((value) => resolveOptionalOptionString(value, "fallbackModel"), z.string().optional()),
+                reasoningEffort: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "reasoningEffort"),
+                    ReasoningEffortSchema.optional()
+                ),
+                triageApiUrl: z.preprocess(
+                    (value) => {
+                        const resolved = resolveOptionString(value, "triageApiUrl");
+                        return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
+                    },
+                    z.url().refine(isHttpUrl, {
+                        message: "Triage API URL must use http or https"
+                    })
+                ),
+                triageApiFormat: z.preprocess((value) => {
+                    const resolved = resolveOptionString(value, "triageApiFormat");
+                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+                }, ApiFormatSchema),
+                triageApiKey: z.preprocess((value) => resolveOptionalOptionString(value, "triageApiKey"), z.string().optional()),
+                triageModel: z.preprocess((value) => resolveOptionalOptionString(value, "triageModel"), z.string().optional()),
+                triageReasoningEffort: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "triageReasoningEffort"),
+                    ReasoningEffortSchema.optional()
+                ),
+                branch: z.preprocess((value) => {
+                    const resolved = resolveOptionString(value, "branch");
+                    return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
+                }, BranchSchema),
+                prompt: z.preprocess((value) => resolveOptionalOptionString(value, "prompt"), z.string().optional()),
+                promptPath: z.preprocess((value) => resolveOptionalOptionString(value, "promptPath"), z.string().optional()),
+                promptUrl: z.preprocess(
+                    (value) => {
+                        const resolved = resolveOptionalOptionString(value, "promptUrl");
+                        return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
+                    },
+                    z
+                        .url()
+                        .refine(isHttpsUrl, {
+                            message: "Prompt URL must use https"
+                        })
+                        .optional()
+                ),
+                promptBearerToken: z.preprocess((value) => resolveOptionalOptionString(value, "promptBearerToken"), z.string().optional()),
+                cachePath: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "cachePath", { emptyStringDisablesDefault: true }),
+                    z.string().optional()
+                ),
+                auditLogPath: z.preprocess(
+                    (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
+                    z.string().optional()
+                ),
+                rejectDuplicateMedia: z.preprocess((value) => resolveOptionBoolean(value, "rejectDuplicateMedia"), z.boolean()),
+                error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
+            })
+            .superRefine((options, context) => {
+                if (options.apiKey && !isHttpsUrl(options.apiUrl)) {
+                    context.addIssue({
+                        code: "custom",
+                        path: ["apiUrl"],
+                        message: "API URL must use https when an API key is configured"
+                    });
+                }
+                if (options.triageApiKey && !isHttpsUrl(options.triageApiUrl)) {
+                    context.addIssue({
+                        code: "custom",
+                        path: ["triageApiUrl"],
+                        message: "Triage API URL must use https when a triage API key is configured"
+                    });
+                }
+            })
     );
 
     return schema;
