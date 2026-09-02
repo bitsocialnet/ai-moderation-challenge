@@ -815,15 +815,19 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
     });
 
-    it("times out a stalled triage request and escalates to the primary reviewer", async () => {
+    it("times out a stalled triage response body and escalates to the primary reviewer", async () => {
         vi.useFakeTimers();
         const fetchMock = vi
             .fn()
-            .mockImplementationOnce(
-                (_url: string, init: RequestInit) =>
-                    new Promise<Response>((_resolve, reject) => {
-                        init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
-                    })
+            .mockImplementationOnce((_url: string, init: RequestInit) =>
+                Promise.resolve({
+                    ok: true,
+                    status: 200,
+                    text: () =>
+                        new Promise<string>((_resolve, reject) => {
+                            init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+                        })
+                } as Response)
             )
             .mockResolvedValueOnce(createChatModelResponse({ verdict: "allow", reason: "no clear violation", matchedRuleIndexes: [] }));
         vi.stubGlobal("fetch", fetchMock);
