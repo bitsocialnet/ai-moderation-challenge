@@ -858,31 +858,95 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(getFetchCall(fetchMock, 1)[0]).toBe("https://api.x.ai/v1/chat/completions");
     });
 
-    it("reports a stalled primary reviewer response body as an aborted request", async () => {
+    it.each([
+        { cascade: false, phase: "headers" },
+        { cascade: false, phase: "body" },
+        { cascade: true, phase: "headers" },
+        { cascade: true, phase: "body" }
+    ])("accepts a reviewer taking 45 seconds for $phase (cascade: $cascade)", async ({ cascade, phase }) => {
         vi.useFakeTimers();
-        const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) =>
-            Promise.resolve({
-                ok: true,
-                status: 200,
-                text: () =>
-                    new Promise<string>((_resolve, reject) => {
-                        init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+        const verdict = { verdict: "allow", reason: "no clear violation", matchedRuleIndexes: [] };
+        const fetchMock = vi.fn();
+        if (cascade) {
+            fetchMock.mockImplementationOnce(
+                () =>
+                    new Promise<Response>((resolve) => {
+                        setTimeout(
+                            () =>
+                                resolve(createModelResponse({ verdict: "review", reason: "possible violation", matchedRuleIndexes: [0] })),
+                            25_000
+                        );
                     })
-            } as Response)
-        );
+            );
+        }
+        fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => {
+            const delayed = <T>(value: T) =>
+                new Promise<T>((resolve, reject) => {
+                    const timer = setTimeout(() => resolve(value), 45_000);
+                    init.signal?.addEventListener("abort", () => {
+                        clearTimeout(timer);
+                        reject(init.signal?.reason);
+                    });
+                });
+            return phase === "headers"
+                ? delayed(createChatModelResponse(verdict))
+                : Promise.resolve({
+                      ok: true,
+                      status: 200,
+                      text: () => delayed(JSON.stringify({ choices: [{ message: { content: JSON.stringify(verdict) } }] }))
+                  } as Response);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const resultPromise = ChallengeFileFactory({} as CommunityChallengeSetting).getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://api.x.ai/v1/chat/completions",
+                apiFormat: "chat-completions",
+                model: "grok-4.6",
+                reasoningEffort: "high",
+                ...(cascade ? { triageModel: "gpt-5.6-luna", triageReasoningEffort: "none" } : {})
+            }),
+            challengeRequestMessage: createCommentRequest(`slow reviewer ${phase} cascade ${cascade}`),
+            challengeIndex: 1,
+            community
+        });
+        let settled = false;
+        void resultPromise.then(() => {
+            settled = true;
+        });
+
+        await vi.advanceTimersByTimeAsync((cascade ? 25_000 : 0) + 30_000);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(15_000);
+
+        await expect(resultPromise).resolves.toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(cascade ? 2 : 1);
+    });
+
+    it.each(["headers", "body"])("reports a stalled primary reviewer response %s as a timeout", async (phase) => {
+        vi.useFakeTimers();
+        const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => {
+            const stall = () =>
+                new Promise<never>((_resolve, reject) => {
+                    init.signal?.addEventListener("abort", () => reject(new Error("request aborted")));
+                });
+            return phase === "headers" ? stall() : Promise.resolve({ ok: true, status: 200, text: stall } as Response);
+        });
         vi.stubGlobal("fetch", fetchMock);
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
 
         const resultPromise = challengeFile.getChallenge({
             challengeSettings: settings({ apiUrl: "https://provider.example/stalled-reviewer" }),
-            challengeRequestMessage: createCommentRequest("stalled reviewer payload"),
+            challengeRequestMessage: createCommentRequest(`stalled reviewer ${phase} payload`),
             challengeIndex: 1,
             community
         });
 
-        await vi.advanceTimersByTimeAsync(30_000);
+        await vi.advanceTimersByTimeAsync(90_000);
 
-        await expect(resultPromise).resolves.toEqual({ success: false, error: "request aborted" });
+        await expect(resultPromise).resolves.toEqual({
+            success: false,
+            error: "AI moderation reviewer request timed out after 90 seconds"
+        });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 

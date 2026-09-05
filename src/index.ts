@@ -42,7 +42,9 @@ const DUPLICATE_MEDIA_RESERVATION_TTL_MS = 2 * 60 * 1000;
 const DUPLICATE_MEDIA_ERROR = "This media was already posted recently.";
 const PROMPT_URL_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROMPT_URL_FETCH_TIMEOUT_MS = 5_000;
-const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
+const TRIAGE_REQUEST_TIMEOUT_MS = 30_000;
+// Reasoning reviewers can need more time than the fast first-pass gate to return a verdict.
+const REVIEWER_REQUEST_TIMEOUT_MS = 90_000;
 const MAX_PROMPT_URL_BYTES = 64 * 1024;
 const MAX_REMOTE_PROMPT_CACHE_ENTRIES = 256;
 
@@ -1664,7 +1666,9 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
     log.trace(`POST ${provider.apiUrl} request sent`);
     // Self-hosted endpoints can run without a key; only send authorization when one is configured.
     const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+    const timeoutMs = provider.stage === "triage" ? TRIAGE_REQUEST_TIMEOUT_MS : REVIEWER_REQUEST_TIMEOUT_MS;
+    const timeoutError = new Error(`AI moderation ${provider.stage} request timed out after ${timeoutMs / 1000} seconds`);
+    const timeout = setTimeout(() => abortController.abort(timeoutError), timeoutMs);
     timeout.unref?.();
     let response: Response;
     let responseText: string;
@@ -1680,6 +1684,9 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
             signal: abortController.signal
         });
         responseText = await response.text();
+    } catch (error) {
+        // Some fetch implementations replace the abort reason while consuming the response body.
+        throw abortController.signal.aborted ? timeoutError : error;
     } finally {
         clearTimeout(timeout);
     }
