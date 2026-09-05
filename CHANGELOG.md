@@ -4,8 +4,8 @@
 
 ### Bug Fixes
 
-* **challenge:** allow reasoning reviewers more response time ([#17](https://github.com/bitsocialnet/ai-moderation-challenge/issues/17)) ([f458639](https://github.com/bitsocialnet/ai-moderation-challenge/commit/f45863974f47f8c88a4f68fe3111028f239891e0))
-* **deps:** remediate Dependabot alerts [skip github-alerts] ([5b4c900](https://github.com/bitsocialnet/ai-moderation-challenge/commit/5b4c900c8dafd12b5d43511e20f0126c48dfd579))
+- **challenge:** allow reasoning reviewers more response time ([#17](https://github.com/bitsocialnet/ai-moderation-challenge/issues/17)) ([f458639](https://github.com/bitsocialnet/ai-moderation-challenge/commit/f45863974f47f8c88a4f68fe3111028f239891e0))
+- **deps:** remediate Dependabot alerts [skip github-alerts] ([5b4c900](https://github.com/bitsocialnet/ai-moderation-challenge/commit/5b4c900c8dafd12b5d43511e20f0126c48dfd579))
 
 ## [0.3.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.2.1...v0.3.0) (2026-09-02)
 
