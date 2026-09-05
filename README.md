@@ -134,7 +134,7 @@ Every option is private by default. An owner can publish specific options by nam
 - New comments with verdict `review` are sent to pending approval with the redacted model reason attached for the author.
 - New comments are also sent to pending approval if the model API is unavailable.
 - When `triageModel` is configured, its `allow` verdict is final and avoids a primary-model call. A triage `review` verdict or triage-provider failure calls the primary reviewer, and only that reviewer's verdict can send content to pending approval.
-- Each provider request times out after 30 seconds. A triage timeout escalates to the primary reviewer; a primary-reviewer timeout follows the same fail-closed path as other provider failures.
+- Triage requests time out after 30 seconds and escalate to the primary reviewer. Reviewer requests have a separate 90-second deadline, including response-body reading, so reasoning models can finish decisions that take longer than the triage limit. Reviewer timeouts still fail closed, and audit errors identify the stage and deadline.
 - When `fallbackModel` is configured, an HTTP 429 from the primary model is retried once with the fallback model before the publication is sent to pending approval.
 - Comments sent to pending approval because moderation is unavailable include a generic moderator-visible reason; provider details remain in the private audit log.
 - Content edits with verdict `review` are rejected until PKC supports pending approval for edits.
