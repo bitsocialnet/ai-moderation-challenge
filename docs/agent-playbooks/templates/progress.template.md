@@ -7,6 +7,6 @@ Append one entry per session.
 - Item: F001
 - Summary: Replace this with the session summary.
 - Files: `path/to/file`
-- Verification: `corepack yarn build`, `corepack yarn type-check`, `corepack yarn test`
+- Verification: Affected checks and their results; use the verification playbook.
 - Blockers: none
 - Next: Replace this with the next best follow-up.

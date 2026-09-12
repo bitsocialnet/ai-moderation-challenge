@@ -1,105 +1,22 @@
 ---
 name: make-closed-issue
-description: Create a GitHub issue from recent changes, commit relevant diffs on a short-lived task branch, push that branch, and open a PR into master that will close the issue on merge. Use when the user says "make closed issue", "close issue", or wants a tracked, already-resolved GitHub issue for completed work.
+description: Create an issue and linked PR for completed work when that tracking workflow is requested.
 ---
 
-# Make Closed Issue
+<!-- Generated from .agents/skills/make-closed-issue/SKILL.md; run yarn ai-workflow:sync. -->
 
-Creates a GitHub issue, commits relevant changes on a review branch, pushes the branch, and opens a PR into `master` that closes the issue when merged.
+# Track Completed Work
 
-## Workflow
+Determine whether the user wants proposed issue wording, an issue created, or the full issue/commit/PR workflow. Honor explicit limits such as no commit or no push. Closing an existing issue is not a request to create a replacement issue or publish code.
 
-### 1. Choose Labels
+For wording only, use the requested diff/context and the `issue-format` guidance; stop with the proposed text. For the full workflow, inspect repository/branch identity and existing issues/PRs first so retries do not create duplicates.
 
-Default mapping:
+Describe the original problem and use concise labels supported by the repository. Resolve the current contributor's login with `gh api user --jq '.login'` when assigning an issue; do not guess another account. If authentication is unavailable, prepare reviewable wording and report the unavailable operation.
 
-| Label           | When                                          |
-| --------------- | --------------------------------------------- |
-| `bug`           | Bug fix                                       |
-| `enhancement`   | New feature                                   |
-| `documentation` | README, AGENTS.md, docs-only changes          |
-| `maintenance`   | Tooling, CI, release, or workflow maintenance |
+Use a task branch into `master` when opening a PR. Preserve unrelated edits and staged changes, and include only the reviewed task hunks in an authorized commit. Reuse completed verification or select missing checks using `docs/agent-playbooks/verification.md`.
 
-Make a reasonable choice from the diff. Ask only if ambiguity materially affects tracking.
+When creation is authorized, use `gh issue create` with the verified repository, labels and assignee. Pass multiline bodies through `--body-file`, and retain the returned issue number. If only an issue was requested, finish after creating it.
 
-### 2. Resolve Current GitHub Assignee
+When the user authorized publishing the change, push only the intended branch and create a ready-for-review PR into `master` with `Closes #<issue>` in its body. A no-push instruction leaves publication pending even if issue creation or a local commit is authorized. Do not merge as part of issue/PR creation.
 
-```bash
-GH_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)
-```
-
-If this is empty, stop and ask the contributor for their GitHub username.
-
-### 3. Ensure a Reviewable Branch
-
-- If already on `codex/feature/*`, `codex/fix/*`, `codex/docs/*`, or `codex/chore/*`, stay on it.
-- If on `master`, create a task branch before staging or committing.
-
-```bash
-git switch -c codex/docs/ai-workflow
-```
-
-### 4. Review Diffs for Relevance
-
-```bash
-git status
-git diff
-git diff --cached
-```
-
-Stage only files related to the completed work. If a file has mixed relevant and unrelated changes and interactive staging is unavailable, include the whole file and note the caveat.
-
-### 5. Create Issue
-
-Write a short problem-focused title and 2-3 sentence description, then:
-
-```bash
-gh issue create \
-  --repo bitsocialnet/ai-moderation-challenge \
-  --title "ISSUE_TITLE" \
-  --body "ISSUE_DESCRIPTION" \
-  --label "LABEL1,LABEL2" \
-  --assignee "$GH_LOGIN"
-```
-
-### 6. Commit Relevant Changes
-
-```bash
-git add <relevant-files>
-git commit -m "type(scope): concise title"
-```
-
-Use scopes such as `challenge`, `schema`, `tests`, `docs`, `release`, or `tooling`.
-
-### 7. Push and Open PR
-
-```bash
-COMMIT_HASH=$(git rev-parse HEAD)
-BRANCH_NAME=$(git branch --show-current)
-git push -u origin "$BRANCH_NAME"
-
-gh pr create \
-  --repo bitsocialnet/ai-moderation-challenge \
-  --base master \
-  --head "$BRANCH_NAME" \
-  --title "PR_TITLE" \
-  --body "$(cat <<EOF
-SUMMARY
-
-Closes #ISSUE_NUMBER
-EOF
-)"
-```
-
-Do not merge the PR as part of this skill unless the user explicitly asks.
-
-### 8. Report Summary
-
-```text
-Issue #NUMBER created, committed, pushed, and linked to a PR into master.
-  Branch: BRANCH_NAME
-  Commit: HASH
-  Labels: label1, label2
-  PR: PR_URL
-  URL: https://github.com/bitsocialnet/ai-moderation-challenge/issues/NUMBER
-```
+Report the actual issue, commit and PR state, including partial completion after failures. An issue linked with `Closes` remains open until its PR merges. Keep an unmerged branch/worktree; run a later review or merge workflow only when requested.

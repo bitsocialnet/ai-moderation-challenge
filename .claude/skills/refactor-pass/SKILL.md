@@ -1,45 +1,14 @@
 ---
 name: refactor-pass
-description: Perform a refactor pass focused on simplicity after recent changes. Use when the user asks for a refactor, cleanup pass, simplification, dead-code removal, or says "refactor pass".
+description: Simplify the requested code while preserving behavior when a refactor or cleanup is requested.
 ---
+
+<!-- Generated from .agents/skills/refactor-pass/SKILL.md; run yarn ai-workflow:sync. -->
 
 # Refactor Pass
 
-## Workflow
+Inspect the task-owned diff, nearby source, and tests. Remove unnecessary work, clarify control flow, and reuse existing helpers where it improves clarity. Preserve unfamiliar guards until source/history establishes their purpose.
 
-1. Review recent changes:
+Preserve observable behavior, public types, error contracts, privacy, and boundary validation. Avoid unrelated formatting and new dependencies for routine cleanup. Use `docs/agent-playbooks/verification.md` to choose affected checks.
 
-    ```bash
-    git diff
-    git diff --cached
-    git log --oneline -5
-    ```
-
-2. Apply refactors in priority order:
-    - Remove dead code and unreachable paths.
-    - Straighten convoluted control flow.
-    - Remove unnecessary intermediaries or abstractions.
-    - Replace `as any` with correct types or guards.
-    - Consolidate duplicated provider parsing, cache-key, or validation logic only when it clearly improves clarity.
-
-3. Verify:
-
-    ```bash
-    corepack yarn build && corepack yarn type-check && corepack yarn test && corepack yarn format:check
-    ```
-
-## Project-Specific Anti-patterns
-
-| Anti-pattern                                                     | Refactor to                                      |
-| ---------------------------------------------------------------- | ------------------------------------------------ |
-| Raw external values trusted directly                             | Zod schema, URL parsing, or explicit type guards |
-| Live provider calls in tests                                     | Stubbed `fetch` responses                        |
-| Raw prompts/API keys/content in persistent cache                 | Stable hash keys plus verdict-only cache entries |
-| Broad catch-all behavior that allows content on provider failure | Existing fail-closed handling                    |
-| Hand-built JSON parsing scattered across files                   | A focused helper near the behavior it supports   |
-
-## Rules
-
-- Preserve behavior.
-- Do not introduce dependencies.
-- Keep changes scoped to recently touched code unless the user asks for a broader pass.
+For moderation code, retain strict Zod parsing, stubbed provider calls in tests, hashed cache identities without raw secrets/content, and fail-closed error handling. Consolidate provider/cache helpers only when their contracts match.

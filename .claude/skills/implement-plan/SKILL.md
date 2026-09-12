@@ -1,31 +1,18 @@
 ---
 name: implement-plan
-description: Orchestrates implementation of a multi-task plan by spawning plan-implementer subagents in parallel. Use when the user provides a plan file or plan text and asks to implement it, execute it, or says "implement plan".
+description: Implement an approved plan, keeping small or coupled work local and delegating substantial independent slices when useful.
 ---
 
-# Implement Plan
+<!-- Generated from .agents/skills/implement-plan/SKILL.md; run yarn ai-workflow:sync. -->
 
-You are the orchestrator. Execute an attached plan by delegating scoped tasks to `plan-implementer` agents when the harness supports it and the user has asked for plan execution.
+# Implement a Plan
 
-## Workflow
+1. Read the plan and relevant source. Identify acceptance criteria, dependencies, and task boundaries. Resolve routine choices from context; ask only about ambiguity that materially changes the result.
+2. Execute small or tightly coupled changes directly. Delegate independent, substantial slices when parallel work or context isolation adds value. Use the harness's built-in worker/general-purpose role rather than requiring a custom implementation agent.
+3. Give each child the exact task, worktree, files it owns, constraints, acceptance criteria, and evidence to return. Tell children they share the checkout and must preserve others' edits. Never delegate overlapping writes concurrently.
+4. Use at most four workers by default. Continue useful independent work locally while they run. Queue dependencies until their inputs are ready.
+5. Assign one owner for heavyweight verification. Children may run focused lightweight checks; they do not each build, install dependencies, run a full suite, or start browsers.
+6. Integrate the changes, inspect the final diff, and run the required checks once for the final state. Browser checks, when relevant, use isolated sessions and sequential engines.
+7. Report completed work, verification, and any unresolved limitation. Retry failed slices with new evidence or a clearer assignment, not the same prompt indefinitely.
 
-1. Read the plan and identify discrete tasks, dependencies, files, and acceptance criteria.
-2. Group tasks into parallel batches. Tasks touching the same files must be in the same agent or a later sequential batch.
-3. Give each implementer exact tasks, paths, constraints, and verification expectations.
-4. Handle partial failures by reading the report, adding context, and retrying only when the next step is clear.
-5. After all batches complete, run final verification:
-
-    ```bash
-    corepack yarn build
-    corepack yarn type-check
-    corepack yarn test
-    corepack yarn format:check
-    ```
-
-6. Report completed tasks, failed tasks, files changed, and verification results.
-
-## Key Constraints
-
-- Do not let subagents own overall task state.
-- Keep write scopes disjoint for parallel agents.
-- Follow `AGENTS.md` privacy and fail-closed moderation rules.
+Create persistent task state only when resumption or a handoff needs it; a short delegated task does not require a feature board or app server.

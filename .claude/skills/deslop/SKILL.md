@@ -1,41 +1,17 @@
 ---
 name: deslop
-description: Scan recent changes for AI-generated code slop and remove it. Use when the user says "deslop", "remove slop", "clean up AI code", or asks to remove AI-generated artifacts from the codebase.
+description: Simplify unnecessary code in the requested diff when the user asks to deslop or clean up AI-generated code.
 disable-model-invocation: true
 ---
 
-# Remove AI Code Slop
+<!-- Generated from .agents/skills/deslop/SKILL.md; run yarn ai-workflow:sync. -->
 
-Scan the diff against `master` and remove AI-generated artifacts introduced in this branch.
+# Remove Unnecessary AI-Generated Code
 
-## Workflow
+Inspect the task-owned diff and nearby source/tests. Remove obvious restatements, avoidable casts, dead helpers, or speculative abstractions only where their purpose and behavior are understood. Preserve unrelated work.
 
-1. Get the diff:
+Check history when a guard or workaround's purpose is unclear. Simplify defensive code only after verifying its input/error contract; retain boundary validation, accessibility, data-loss protection, and useful error handling. A one-caller helper can clarify a real boundary, and a repeated expression does not automatically need abstraction.
 
-    ```bash
-    git diff master...HEAD
-    git diff master
-    ```
+Match nearby style without reformatting adjacent code. Preserve comments explaining constraints or tradeoffs. When evidence is insufficient, retain the code and report the uncertainty instead of inventing cleanup work.
 
-2. Scan each changed file for the slop categories below.
-3. Fix each instance to match surrounding style.
-4. Verify:
-
-    ```bash
-    corepack yarn build && corepack yarn type-check && corepack yarn test && corepack yarn format:check
-    ```
-
-## Slop Categories
-
-- Comments that restate obvious code instead of explaining a moderation, privacy, provider, or PKC constraint.
-- Excessive defensive checks on trusted internal values while missing validation at external boundaries.
-- `as any` casts that avoid fixing the actual type issue.
-- New abstractions that hide simple request parsing, schema validation, cache-key, or branch logic.
-- Inconsistent formatting, import ordering, naming, or test style.
-- Live provider calls in tests or examples where a stub would be safer.
-
-## Rules
-
-- Do not change behavior during a deslop pass.
-- Do not introduce dependencies.
-- Keep comments that explain non-obvious constraints.
+Verify affected behavior using `docs/agent-playbooks/verification.md`, reuse existing checks for unchanged code, and report the useful simplifications.

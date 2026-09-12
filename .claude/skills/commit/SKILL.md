@@ -1,41 +1,21 @@
 ---
 name: commit
-description: Commit current work by reviewing diffs, splitting into logical commits, and writing standardized messages. Use when the user says "commit", "commit this", "commit current work", or asks to create a git commit.
+description: Create scoped local commits when the user asks to commit changes.
 disable-model-invocation: true
 ---
 
-# Commit Current Work
+<!-- Generated from .agents/skills/commit/SKILL.md; run yarn ai-workflow:sync. -->
 
-## Workflow
+# Commit
 
-1. Review all uncommitted changes:
+Review the requested diff, including staged and untracked files, and preserve unrelated work. Group independently useful changes into separate commits; do not split one coherent change merely by file type.
 
-    ```bash
-    git status
-    git diff
-    git diff --cached
-    ```
+Use the existing final-state verification and review evidence when still applicable. Follow `docs/agent-playbooks/verification.md` for any missing checks. A completed review does not need to be repeated just to commit the same diff.
 
-2. Group changes into logical commits. Split unrelated documentation, tooling, tests, and runtime changes when that makes review clearer.
+Stage only task-owned hunks and inspect `git diff --cached` before committing. For mixed files, use an index patch. Exclude unrelated staged changes from the commit and restore their staging afterward.
 
-3. Stage only the relevant files for each commit:
+Use a Conventional Commit with a required human-readable scope: `type(scope): concise description`. Use `perf` for performance work. A body is optional when the title is insufficient; see `commit-format` for wording requests.
 
-    ```bash
-    git add <relevant-files>
-    git commit -m "type(scope): short description"
-    ```
+Use `corepack yarn exec git commit -m 'type(scope): description'` so the repository's Git hooks inherit Corepack Yarn rather than a global Yarn version. Report the resulting hash and title.
 
-4. Display the commit title to the user wrapped in inline code.
-
-## Commit Message Rules
-
-- Use Conventional Commits with a required scope: `type(scope): description`.
-- Good scopes for this repo include `challenge`, `schema`, `tests`, `docs`, `release`, and `tooling`.
-- Use `perf:` for performance optimizations, not `fix:`.
-- Keep titles short. Add a body only when the title is not enough.
-
-## Constraints
-
-- Only commit when instructed.
-- Never push unless the user explicitly asks.
-- Never amend commits that have been pushed to a remote unless the user explicitly asks.
+Only commit within the user's authorization. Do not push, tag, or amend published history as part of this skill. Explicitly requested later actions retain their own scope.

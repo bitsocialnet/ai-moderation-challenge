@@ -48,7 +48,10 @@
         "type-check": "tsc -p tsconfig.json --noEmit",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
-        "release": "HUSKY=0 release-it --config .release-it.json"
+        "release": "HUSKY=0 release-it --config .release-it.json",
+        "ai-workflow:sync": "node scripts/sync-ai-workflow.mjs",
+        "ai-workflow:check": "node scripts/validate-ai-workflow.mjs",
+        "ai-workflow:test": "node --test scripts/__tests__/ai-workflow.node-test.mjs scripts/__tests__/agent-hooks.node-test.mjs"
     },
     "dependencies": {
         "@pkcprotocol/pkc-logger": "0.1.0",
@@ -59,8 +62,10 @@
         "@release-it/conventional-changelog": "10.0.1",
         "@vitest/coverage-v8": "4.1.10",
         "esbuild": "0.28.1",
+        "js-yaml": "4.3.1",
         "prettier": "3.8.1",
         "release-it": "19.2.3",
+        "smol-toml": "1.6.1",
         "typescript": "7.0.2",
         "vitest": "4.1.10"
     },

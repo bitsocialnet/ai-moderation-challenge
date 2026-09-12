@@ -9,4 +9,4 @@ These rules apply to `src/**`. Follow the repo-root `AGENTS.md` first, then use 
 - Preserve fail-closed behavior for unavailable or malformed model responses.
 - Do not fetch linked media or URLs during moderation.
 - When changing request payloads, response parsing, cache keys, or option defaults, update `tests/challenge.test.ts` or a nearby test file.
-- After edits, run `corepack yarn build`, `corepack yarn type-check`, `corepack yarn test`, and `corepack yarn format:check`.
+- Select affected checks with the root `docs/agent-playbooks/verification.md`; runtime integration and release changes require build/type-check/full tests.

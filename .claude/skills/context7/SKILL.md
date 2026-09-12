@@ -1,26 +1,14 @@
 ---
 name: context7
-description: Retrieve up-to-date documentation for software libraries, frameworks, and components via the Context7 API. Use when looking up documentation for a programming library, verifying APIs, or obtaining current library examples.
+description: Retrieve library documentation with Context7 when the current task needs version-specific API guidance or a concrete documentation lookup.
 ---
+
+<!-- Generated from .agents/skills/context7/SKILL.md; run yarn ai-workflow:sync. -->
 
 # Context7
 
-Use Context7 when library behavior may have changed since training data. In this repo, likely targets include Zod, Vitest, TypeScript, release-it, esbuild, and provider API clients.
+Use the installed dependency version and the API question to scope the lookup. Existing source and tests may already answer it; a normal coding task does not require a Context7 search merely because it uses a library.
 
-## Search
+Use an available Context7 tool, or read [HTTP lookup](references/http-lookup.md) when calling the API directly. Select the matching library and version from the results; do not assume the first result or latest release matches this repository.
 
-```bash
-curl -s "https://context7.com/api/v2/libs/search?libraryName=LIBRARY_NAME&query=TOPIC" | jq '.results[0]'
-```
-
-## Fetch Docs
-
-```bash
-curl -s "https://context7.com/api/v2/context?libraryId=LIBRARY_ID&query=TOPIC&type=txt"
-```
-
-## Tips
-
-- Use `type=txt` for readable output.
-- Be specific with the `query` parameter.
-- Prefer official docs when the topic is provider-specific or security-sensitive.
+Fetch only documentation relevant to the decision. Check returned examples against the installed API and link the underlying official documentation when reporting a claim. If Context7 is unavailable, use official docs or installed source instead of installing another integration or blocking unrelated work.

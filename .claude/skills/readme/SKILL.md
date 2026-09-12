@@ -1,40 +1,16 @@
 ---
 name: readme
-description: Create or update README.md documentation for this package. Use when the user says "write readme", "create readme", "document this project", "project documentation", or asks for README help.
+description: Create, rewrite, or edit the requested README content, verifying relevant commands and project facts.
 ---
 
-# README Generator
+<!-- Generated from .agents/skills/readme/SKILL.md; run yarn ai-workflow:sync. -->
 
-Write README documentation that helps a contributor or community node operator understand setup, behavior, configuration, and publishing.
+# README
 
-## Before Writing
+Update the requested section in place, preserving the existing tone, structure, and unrelated content. A narrow edit needs only the sources that support it; a full project overview is appropriate when a new README or rewrite is requested.
 
-Explore the codebase first:
+Verify changed claims against relevant manifests, source, or runtime evidence. For setup commands, check `package.json` and the applicable launcher; inspect release, deployment, or architecture files only when documenting that topic. Use Corepack-managed Yarn commands and the repository's actual configuration filenames.
 
-- `package.json`
-- `README.md`
-- `src/index.ts`
-- `src/schema.ts`
-- `tests/challenge.test.ts`
-- `.github/workflows/*.yml`
+Explain the outcome for the intended reader, with copyable commands where useful. Link maintained design, product, contribution, or release docs instead of duplicating their policies. Do not invent troubleshooting advice or expand a small correction into a new documentation structure.
 
-Confirm option defaults from source rather than copying stale docs.
-
-## Required Coverage
-
-- What the package does and where it runs.
-- Installation command.
-- Challenge configuration examples for `allow` and `review` branches.
-- Full options table with defaults.
-- Behavior for new comments, edits, deletes, non-comment publication types, provider failures, and caching.
-- Privacy boundaries for `apiKey`, prompts, prompt paths, and cache files.
-- Local development commands.
-- Publishing and trusted publishing expectations.
-
-## Rules
-
-- Do not include real API keys.
-- Make examples clearly fake.
-- Keep user-facing behavior plain and precise.
-- If documenting provider compatibility, state that OpenAI-compatible APIs are a practical convention and must be tested before live use.
-- Run `corepack yarn format:check` after README edits.
+Follow `docs/agent-playbooks/verification.md` for affected documentation checks and run the configured `llms:generate` script when present and include its generated indexes. Include generated changes in the deliverable; commit or publish only within the user's authorization. Report the edited scope and any claim that could not be verified.

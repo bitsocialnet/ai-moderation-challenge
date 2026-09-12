@@ -1,97 +1,22 @@
 ---
 name: review-and-merge-pr
-description: Review an open GitHub pull request, inspect feedback from bots, CI, and human reviewers, implement valid fixes on the PR branch, merge when ready, and clean up local state. Use when the user says "check the PR", "address comments", "review PR feedback", or "merge this PR".
+description: Review an existing pull request's feedback and readiness, apply requested fixes, or complete an authorized merge.
 ---
 
-# Review And Merge PR
+<!-- Generated from .agents/skills/review-and-merge-pr/SKILL.md; run yarn ai-workflow:sync. -->
 
-## Overview
+# Review and Merge a PR
 
-Use this after a feature branch already has an open PR into `master`. Treat review bots as input rather than authority. Merge only once the branch is verified and remaining comments are fixed, deferred, or declined with a reason.
+Identify the requested PR, current head, target branch, and task scope. Use `gh` for GitHub operations. Carry existing authorization through the necessary work; the skill name does not itself authorize publication.
 
-## Workflow
+| Requested outcome | Work to perform |
+|---|---|
+| Review or readiness assessment | Read the diff, checks, and feedback; return findings locally without edits or external comments |
+| Fix review findings | Apply supported fixes within the requested scope, preserving unrelated work; commit/push only when included in the authorization |
+| Merge | Resolve relevant findings and complete the authorized merge once readiness is established; honor any explicit no-push or other limit |
 
-### 1. Identify the PR
+Read [feedback review](references/feedback.md) when collecting bot/human feedback. Read [merge and cleanup](references/merge.md) only when a merge is requested. Use the same PR head for authorized fixes; avoid switching branches beneath another task or opening a replacement PR.
 
-```bash
-gh pr status
-gh pr list --repo bitsocialnet/ai-moderation-challenge --state open
-gh pr view <pr-number> --repo bitsocialnet/ai-moderation-challenge --json number,title,url,headRefName,baseRefName,isDraft,reviewDecision,mergeStateStatus
-```
+Judge comments against the actual source and current diff. Report real defects, declined claims, and relevant deferred work with evidence. Do not repeatedly reopen a resolved finding without new evidence. If a material requirement is unresolved, finish independent checks and identify the missing decision.
 
-If there is no open PR, stop and use `make-closed-issue` or create a PR first.
-
-### 2. Gather Review Signals
-
-```bash
-gh pr checks <pr-number>
-gh api "repos/bitsocialnet/ai-moderation-challenge/issues/<pr-number>/comments?per_page=100"
-gh api "repos/bitsocialnet/ai-moderation-challenge/pulls/<pr-number>/reviews?per_page=100"
-gh api "repos/bitsocialnet/ai-moderation-challenge/pulls/<pr-number>/comments?per_page=100"
-```
-
-Read CI failures, review summaries, and inline comments before editing.
-
-### 3. Triage Findings
-
-- `must-fix`: correctness bugs, broken behavior, crashes, security issues, test failures, privacy leaks, fail-open moderation behavior.
-- `should-fix`: clear maintainability or edge-case issues with concrete evidence.
-- `defer`: real but non-blocking follow-up work.
-- `decline`: false positives, stale comments, duplicate findings, speculative style-only suggestions, or already-addressed feedback.
-
-Never merge with unresolved `must-fix` findings.
-
-### 4. Work on the PR Branch
-
-```bash
-git switch <head-branch>
-git fetch origin <head-branch>
-git status --short --branch
-```
-
-Apply valid fixes, commit, and push to the same branch. Do not open a replacement PR unless the user asks.
-
-### 5. Verify
-
-```bash
-corepack yarn build
-corepack yarn type-check
-corepack yarn test
-corepack yarn format:check
-```
-
-### 6. Comment if Feedback Was Addressed
-
-```bash
-gh pr comment <pr-number> --repo bitsocialnet/ai-moderation-challenge --body "Addressed the valid review findings in the latest commit. Remaining comments were triaged as stale, low-risk, or follow-up work that does not block this merge."
-```
-
-### 7. Merge When Ready
-
-Only merge if:
-
-- The PR is not draft.
-- Required checks are passing.
-- The branch is mergeable into `master`.
-- No unresolved `must-fix` findings remain.
-- The latest code was verified locally after the last review-driven change.
-
-```bash
-gh pr merge <pr-number> --repo bitsocialnet/ai-moderation-challenge --squash --delete-branch
-```
-
-### 8. Clean Up Local State
-
-```bash
-git switch master
-git fetch origin --prune
-git pull --ff-only
-git branch -D <head-branch> 2>/dev/null || true
-git branch -D "pr/<pr-number>" 2>/dev/null || true
-```
-
-If the PR branch lived in a dedicated worktree, remove that worktree after leaving it.
-
-### 9. Report Outcome
-
-Report findings fixed, findings deferred/declined, verification commands, merge status, linked issues closed, refs pruned, and local branch/worktree cleanup.
+Use `docs/agent-playbooks/verification.md` for the affected checks, reusing evidence for an unchanged final state. Summarize the outcome in the conversation. Posting a PR comment or changing its metadata requires that action to be within the requested scope; neither is a mandatory finishing ritual.

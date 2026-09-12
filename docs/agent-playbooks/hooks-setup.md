@@ -1,34 +1,13 @@
-# Agent Hooks Setup
+# Agent hooks
 
-If your AI coding assistant supports lifecycle hooks, configure these for this repo.
+The only automatic action is formatting successfully edited JavaScript/TypeScript files with the installed Prettier binary. No dependency installation, full verification, branch cleanup, network operations, or review loop runs when a task stops.
 
-## Recommended Hooks
+- Codex: `.codex/hooks.json`, `PostToolUse` matching `apply_patch`.
+- Cursor: `.cursor/hooks.json`, `afterFileEdit`.
+- Claude Code: `.claude/settings.json`, `PostToolUse` matching `Edit|Write|MultiEdit`.
 
-| Hook            | Command                                            | Purpose                                                                                     |
-| --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `afterFileEdit` | `scripts/agent-hooks/format.sh`                    | Auto-format edited files with the repo Prettier config                                      |
-| `afterFileEdit` | `scripts/agent-hooks/yarn-install.sh`              | Run `corepack yarn install` when `package.json` changes                                     |
-| `afterFileEdit` | `scripts/agent-hooks/moderation-pattern-review.sh` | Remind agents to re-check privacy and fail-closed behavior after sensitive moderation edits |
-| `stop`          | `scripts/agent-hooks/sync-git-branches.sh`         | Prune stale refs and delete integrated temporary task branches                              |
-| `stop`          | `scripts/agent-hooks/moderation-pattern-review.sh` | Re-scan the current diff for sensitive moderation changes before final verification         |
-| `stop`          | `scripts/agent-hooks/verify.sh`                    | Hard-gate build, type-check, test, and format check; keep `yarn npm audit` informational    |
+Each native hook calls its thin `hooks/format.sh` wrapper, which locates the repository and invokes `scripts/agent-hooks/format.mjs`. The formatter handles native edit payloads, skips failed/read-only/unknown calls, resolves real paths to contain writes within the checkout, and invokes installed Prettier without a shell or package-manager bootstrap. Missing dependencies cause a no-op; formatter errors are advisory. Repository Prettier ignores still apply.
 
-## Why
+Run the workflow checks after changing a hook. Disposable fixtures exercise path traversal, symlinks, shell metacharacters, malformed payloads, multiple patch files, dependency absence, and failure reporting. These tests validate local behavior rather than proving live activation in every app; restart/reload the app when its configuration loading requires it.
 
-- Consistent formatting
-- Lockfile stays in sync
-- Sensitive prompt/API/cache changes get an explicit second look
-- Build, type, test, and formatting issues are caught early
-- Security visibility via `corepack yarn npm audit`
-- One shared hook implementation for Codex, Cursor, and Claude
-- Temporary task branches stay aligned with the repo's worktree workflow
-
-## Verification Mode
-
-By default, `scripts/agent-hooks/verify.sh` exits non-zero when required checks fail. Set `AGENT_VERIFY_MODE=advisory` only when you intentionally need signal from a broken tree without blocking the hook.
-
-## Toolchain Wiring
-
-`.codex/hooks/*.sh`, `.cursor/hooks/*.sh`, and `.claude/hooks/*.sh` should stay thin wrappers that delegate to the shared implementations under `scripts/agent-hooks/`.
-
-Harness-specific startup hooks can live alongside those wrappers when other harnesses do not have an equivalent entry point. Claude uses `.claude/hooks/session-start.sh` to install dependencies when a new worktree has a `yarn.lock` but no populated `node_modules`.
+Installs and verification are explicit task work selected using [verification.md](verification.md). Git cleanup happens only under the user’s authorization and after confirming branch/worktree ownership.

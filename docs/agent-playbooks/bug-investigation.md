@@ -24,11 +24,11 @@ git show <commit-hash> -- src/index.ts
 3. Reproduce with the narrowest check:
 
 ```bash
-corepack yarn test -- tests/challenge.test.ts
+corepack yarn exec vitest run --maxWorkers=2 tests/challenge.test.ts
 ```
 
 4. Fix after understanding the history context, then run the required verification from `AGENTS.md`.
 
 ## Troubleshooting Rule
 
-When blocked, search current docs or package issue trackers for recent fixes/workarounds, especially for provider API response shapes, `pkc-js` challenge types, Zod behavior, or Yarn 4 behavior.
+Consult current official documentation or package issue trackers when a concrete provider/API or dependency question blocks progress. Report missing private source or user-only reproduction steps precisely; continue independent work.

@@ -275,30 +275,23 @@ Compiled context:
 
 Agents may use compiled context to navigate quickly, but must verify against source files before making behavioral claims or edits. External code graph, RAG, MCP, or wiki tools are optional local accelerators unless the developer explicitly asks to make one part of the committed workflow.
 
-## Task Router (Read First)
+## Task router
 
-| Situation                                                                                                                                          | Required action                                                                                                                                                                                   |
-| -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime challenge code changed (`src/**`)                                                                                                          | Read `src/AGENTS.md`, then run `corepack yarn build`, `corepack yarn type-check`, and `corepack yarn test`                                                                                        |
-| Tests changed (`tests/**`)                                                                                                                         | Read `tests/AGENTS.md`, then run `corepack yarn test` and the narrowest extra check that proves the change                                                                                        |
-| `package.json` changed                                                                                                                             | Run `corepack yarn install` to keep `yarn.lock` in sync                                                                                                                                           |
-| API request/response parsing, prompt handling, cache keying, or secret handling changed                                                            | Add or update Vitest coverage and use the moderation review checklist in `.codex/agents/moderation-reviewer.toml` or the equivalent Cursor/Claude agent                                           |
-| `README.md`, package version, or release workflow changed                                                                                          | Verify docs against the code and use the `release` or `release-description` skill when preparing a release                                                                                        |
-| Public docs or AI context changed (`README.md`, `AGENTS.md`, `src/AGENTS.md`, `tests/AGENTS.md`, docs pages, or `scripts/generate-llms-files.mjs`) | Run `corepack yarn llms:generate`; inspect and commit any resulting changes to `llms*.txt` so LLM indexes stay current                                                                            |
-| Bug report                                                                                                                                         | Apply the Bug Investigation Rules below before editing                                                                                                                                            |
-| Long-running task spans multiple sessions, handoffs, or spawned agents                                                                             | Use `docs/agent-playbooks/long-running-agent-workflow.md`, keep a machine-readable feature list plus a progress log, and run `./scripts/agent-init.sh --smoke` before starting a fresh task slice |
-| New reviewable feature/fix started while on `master`                                                                                               | Create a short-lived `codex/feature/*`, `codex/fix/*`, `codex/docs/*`, or `codex/chore/*` branch from `master` before editing unless the user explicitly asks to work on `master`                 |
-| New unrelated task started while another task branch is already checked out or being worked on by another agent                                    | Create a separate worktree from `master`, create a new short-lived task branch there, and keep each agent on its own worktree/branch/PR                                                           |
-| Open PR needs feedback triage or merge readiness check                                                                                             | Use the `review-and-merge-pr` skill to inspect bot/human feedback, fix valid findings, and merge only after verification                                                                          |
-| Repo AI workflow files changed (`.codex/**`, `.cursor/**`, `.claude/**`)                                                                           | Keep Codex, Cursor, and Claude copies aligned when they represent the same workflow; update `AGENTS.md` if the default agent policy changes                                                       |
-| GitHub operation needed                                                                                                                            | Use `gh` CLI, not GitHub MCP                                                                                                                                                                      |
-| User asks for commit/issue phrasing                                                                                                                | Use `docs/agent-playbooks/commit-issue-format.md`                                                                                                                                                 |
-| Surprising/ambiguous repo behavior encountered                                                                                                     | Alert developer and, once confirmed, document it in `docs/agent-playbooks/known-surprises.md`                                                                                                     |
+| Change                                                              | Guidance                                                                                             |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Runtime `src/**`                                                    | Read `src/AGENTS.md`; choose checks with `docs/agent-playbooks/verification.md`.                     |
+| Tests                                                               | Read `tests/AGENTS.md`; run the affected tests.                                                      |
+| Provider parsing, prompts, cache keys, secrets, or branch semantics | Add focused Vitest coverage; use the moderation-reviewer checklist when a separate review is useful. |
+| Dependency manifest                                                 | Run `corepack yarn install` and include the lockfile.                                                |
+| Public docs or AI context                                           | Run `corepack yarn llms:generate` and include `llms*.txt`.                                           |
+| Release                                                             | Use the release skill within the requested preview/preparation/publication boundary.                 |
+| Durable handoff/resumption                                          | Use `docs/agent-playbooks/long-running-agent-workflow.md`.                                           |
+| Requested PR review or merge                                        | Use `review-and-merge-pr` within the authorized scope.                                               |
 
 ## Stack
 
 - Node.js 22+
-- TypeScript 6 with `NodeNext`
+- TypeScript with `NodeNext` (see installed manifest version)
 - esbuild for the bundled ESM output
 - Vitest for tests
 - Zod for option and model-verdict validation
@@ -352,19 +345,6 @@ docs/
 - Keep module imports compatible with NodeNext ESM and the package `exports` map.
 - Comments should explain non-obvious moderation, privacy, PKC, or provider-compatibility constraints. Remove comments that only restate the code.
 
-### Git Workflow Rules
-
-- Keep `master` releasable. Do not treat `master` as a scratch branch.
-- If the user asks for a reviewable feature/fix and the current branch is `master`, create a short-lived task branch before making code changes unless the user explicitly asks to work directly on `master`.
-- Name short-lived AI task branches by intent under the Codex prefix: `codex/feature/*`, `codex/fix/*`, `codex/docs/*`, `codex/chore/*`.
-- Open PRs from task branches into `master` so review bots and CI run against the actual change.
-- Use worktrees only when parallel tasks need isolated checkouts. One active task branch per worktree.
-- If a new task is unrelated to the currently checked out branch, do not stack it on that branch. Create a new worktree from `master` and a separate short-lived task branch there.
-- Always give a new worktree a descriptive name that reflects the task (e.g. `fix-login-redirect`, not `wt1`, `tmp`, `feature`, or a numbered slug), so it can be identified at a glance in a long list of worktrees. When using `./scripts/create-task-worktree.sh`, the `<slug>` argument must be that descriptive name.
-- Prefer `./scripts/create-task-worktree.sh <feature|fix|docs|chore> <slug>` when you need a new task worktree and do not have a stronger repo-specific reason to create it manually.
-- Treat branch and worktree as different things: the branch is the change set; the worktree is the checkout where that branch is worked on.
-- After a reviewed branch is merged, prefer deleting it to keep branch drift and merge conflicts low.
-
 ### Bug Investigation Rules
 
 - A bug fix requires either a reproduction of the reported behavior or conclusive source/runtime evidence that identifies both the defect and the correct fix with equivalent certainty.
@@ -374,50 +354,17 @@ docs/
 - Minimum sequence: `git log --oneline` or `git blame` first, then scoped `git show` for relevant commits.
 - Full workflow: `docs/agent-playbooks/bug-investigation.md`.
 
-### Verification Rules
-
-- Never mark work complete without verification.
-- After code changes, run: `corepack yarn build`, `corepack yarn type-check`, `corepack yarn test`, and `corepack yarn format:check`.
-- If only docs or AI workflow files changed, run `corepack yarn format:check` and any hook or script check directly affected by the change.
-- If dependency manifests changed, run `corepack yarn install` before verification.
-- Treat `corepack yarn npm audit` as advisory visibility, not a repo-wide blocking gate unless the user asks for one.
-- Do not commit generated build output. `dist/` is ignored generated output; remove it after local verification if it exists.
-- If verification fails, fix and re-run until passing or explain the blocker with exact commands and failure context.
-
-### Tooling Constraints
-
-- Use `gh` CLI for GitHub work (issues, PRs, actions, npm trusted publishing context, search).
-- Do not use GitHub MCP for this repository.
-- If many MCP tools are present in context, warn the user and suggest disabling unused MCPs.
-
-### AI Tooling Rules
-
-- Treat `.codex/`, `.cursor/`, and `.claude/` as repo-managed contributor tooling, not private scratch space.
-- Keep equivalent workflow files aligned across all toolchains when their directories contain the same skill, hook, or agent.
-- Keep shared behavior equivalent while preserving harness-specific models, config formats, hook entry points, and tool invocation syntax.
-- Do not configure `.claude` agents to use `composer-2`; that model is Cursor-only.
-- Do not use undocumented model aliases such as `latest` in Codex custom-agent TOML files. Omit both `model` and `model_reasoning_effort` so custom agents inherit the current parent settings.
-- When changing shared agent behavior, update the relevant files in `.codex/skills/`, `.cursor/skills/`, `.claude/skills/`, `.codex/agents/`, `.cursor/agents/`, `.claude/agents/`, `.codex/hooks/`, `.cursor/hooks/`, `.claude/hooks/`, and their hook or config entry points as needed.
-- Review `.codex/config.toml`, `.cursor/hooks.json`, and `.claude/hooks.json` before changing agent orchestration or hook behavior, because they are the entry points contributors will actually load.
-- Directory-specific auto-loaded rules live under `src/AGENTS.md`, `tests/AGENTS.md`, and `scripts/AGENTS.md`; read them before editing files in those trees.
-- For work expected to span multiple sessions, keep explicit task state in a `feature-list.json` plus `progress.md` pair using `docs/agent-playbooks/long-running-agent-workflow.md`.
-- If more than one human or toolchain needs the same task state, keep it in a tracked location such as `docs/agent-runs/<slug>/` instead of burying it in a tool-specific hidden directory.
-
 ### Project Maintenance Rules
 
 - Keep README examples aligned with the code defaults in `src/schema.ts` and runtime behavior in `src/index.ts`.
 - If package version changes, verify release notes/changelog output with the `release` skill and the GitHub workflow expectations in `README.md`.
 - First-time npm publishing is manual; future version publishes are handled by `.github/workflows/publish.yml` when `package.json` changes on `master`.
 
-## Core SHOULD Rules
+## Additional guidance
 
-- Keep context lean: delegate heavy/verbose tasks to subprocesses when available.
-- Parallelize independent checks when the harness supports it.
-- Add or update tests for bug fixes and non-trivial runtime behavior changes.
-- When touching already-covered code, prefer extending nearby tests so important moderation behavior stays covered.
-- When proposing or implementing meaningful code changes, include both a Conventional Commit title suggestion and a short GitHub issue suggestion using `docs/agent-playbooks/commit-issue-format.md`.
-- When stuck on a bug, search the web for recent fixes/workarounds, especially for provider API shape changes or PKC package behavior.
-- After user corrections, identify root cause and apply the lesson in subsequent steps.
+- Extend nearby tests for non-trivial moderation changes. Keep provider calls stubbed and avoid private settings in fixtures.
+- Use `gh` for GitHub operations. Provide commit/issue suggestions when requested, not on every answer.
+- Search current official documentation when a concrete provider/API or dependency-version question requires it. Tool integrations are optional; do not install additional tools merely because the task mentions their domain.
 
 ## Common Commands
 
@@ -443,6 +390,24 @@ Use these only when relevant to the active task:
 - Skills/tools setup and rationale: `docs/agent-playbooks/skills-and-tools.md`
 - Bug investigation workflow: `docs/agent-playbooks/bug-investigation.md`
 - Known surprises log: `docs/agent-playbooks/known-surprises.md`
+
+## Workflow and ownership
+
+- Continue authorized work through implementation, affected checks, and fixes. Ask only when missing information changes the result or an action lacks authorization; do not add approval gates from suggested skill procedures.
+- Verify technical claims against source, tests, manifests, and runtime evidence. Agent instructions and generated context orient the task; they do not establish behavior.
+- Keep changes scoped, preserve unrelated edits and preexisting artifacts, and stage only task-owned changes. Commit, push, publish, or merge only within the user’s authorization; existing authorization persists.
+- Keep `master` releasable. Use a short-lived descriptive `codex/` branch for new work unless the user requests another branch or direct work on `master`. Use separate worktrees for unrelated concurrent tasks; never switch branches underneath another agent.
+- Delegate substantial independent slices when useful, with explicit scope, file ownership, acceptance criteria, and evidence to return. Small or coupled work can stay local. Use built-in worker/explorer roles where available; custom roles cover project-specific review or verification.
+- One owner runs installs, full suites, builds, and browsers. Parallelize independent reads and non-overlapping edits; use at most four workers by default. Do not run Git cleanup, installs, full verification, or review loops from lifecycle hooks.
+- Review the final diff and use the narrowest reliable checks in [verification.md](docs/agent-playbooks/verification.md). Repeat checks only after relevant changes, failures, or new uncertainty. Preserve explicit CI/release requirements.
+
+## Shared AI tooling
+
+- Edit `.agents/skills/` and `.agents/roles/`, then run `corepack yarn ai-workflow:sync`, `corepack yarn ai-workflow:check`, and `corepack yarn ai-workflow:test`.
+- `.agents/roles/` is this repository’s generator input, not a native app discovery path. Commit the generated `.codex/agents/*.toml`, `.cursor/agents/*.md`, `.claude/agents/*.md`, and `.claude/skills/` outputs. Codex and Cursor read `.agents/skills/`; Claude uses the generated copies and `CLAUDE.md` importing `AGENTS.md`.
+- Leave model and reasoning fields unset in skills and roles. Runtime invocation, app/user defaults, and parent inheritance select them. Do not pin a generation or model family in repository prompts.
+- Keep hook schemas and permissions native to each harness; similar file contents do not imply identical runtime behavior. See [skills-and-tools.md](docs/agent-playbooks/skills-and-tools.md).
+- Keep skill descriptions precise and roots short. Load references when relevant; preserve domain constraints and supported manual-invocation metadata. Prefer installed tools and current official documentation when versions matter; search for or install additional skills only when requested.
 ```
 
 ---
@@ -463,7 +428,7 @@ These rules apply to `src/**`. Follow the repo-root `AGENTS.md` first, then use 
 - Preserve fail-closed behavior for unavailable or malformed model responses.
 - Do not fetch linked media or URLs during moderation.
 - When changing request payloads, response parsing, cache keys, or option defaults, update `tests/challenge.test.ts` or a nearby test file.
-- After edits, run `corepack yarn build`, `corepack yarn type-check`, `corepack yarn test`, and `corepack yarn format:check`.
+- Select affected checks with the root `docs/agent-playbooks/verification.md`; runtime integration and release changes require build/type-check/full tests.
 ```
 
 ---
@@ -481,7 +446,7 @@ These rules apply to `tests/**`. Follow the repo-root `AGENTS.md` first, then us
 - Stub `fetch` and filesystem paths explicitly; never depend on live provider endpoints, real API keys, or a contributor's private cache file.
 - Include assertions for privacy-sensitive behavior when relevant: no linked media fetches, no raw prompt/API key cache storage, and fail-closed provider errors.
 - Keep fixtures small and focused. Prefer helpers that mirror PKC request shapes over broad `as any` shortcuts.
-- After test edits, run `corepack yarn test`. Run `corepack yarn type-check` when helper types or source imports changed.
+- After test edits, run the affected Vitest paths with `--maxWorkers=2`. Run `corepack yarn type-check` when helper types or source imports changed.
 ```
 
 ---
@@ -539,72 +504,13 @@ If uncertain, ask the developer before adding an entry.
 Source: https://github.com/bitsocialnet/ai-moderation-challenge/blob/master/docs/agent-playbooks/long-running-agent-workflow.md
 
 ```markdown
-# Long-Running Agent Workflow
+# Long-running work
 
-Use this playbook when a task is likely to span multiple sessions, handoffs, or spawned agents.
+Use durable state only when a task needs resumption or handoff. Short tasks and ordinary delegation do not require a task board.
 
-## Goals
+Record scope, acceptance criteria, important decisions, file/branch ownership, completed checks, failures, and the next concrete step in `docs/agent-runs/<descriptive-slug>/progress.md` when shared tracked state is useful. Add a feature list only when multiple independent outcomes need tracking; templates live in `templates/`.
 
-- Give each fresh session a fast way to regain context
-- Keep work incremental instead of one-shotting a large change
-- Catch a broken local baseline before adding more code
-- Leave durable artifacts that the next session can trust
-
-## Where to Keep State
-
-- Use `docs/agent-runs/<slug>/` when humans, review bots, or multiple toolchains need the same task state.
-- Use a tool-local directory such as `.codex/runs/<slug>/` only when the task state is intentionally local to one workstation or one toolchain.
-- Do not hide multi-session shared state in a private scratch file if another contributor or agent will need it later.
-
-## Required Files
-
-Create these files at the start of the long-running task:
-
-- `feature-list.json`
-- `progress.md`
-
-Use the templates in `docs/agent-playbooks/templates/feature-list.template.json` and `docs/agent-playbooks/templates/progress.template.md`.
-
-Prefer JSON for the feature list so agents can update a small number of fields without rewriting the whole document.
-
-## Session Start Checklist
-
-1. Run `pwd`.
-2. Read `progress.md`.
-3. Read `feature-list.json`.
-4. Run `git log --oneline -20`.
-5. Run `./scripts/agent-init.sh --smoke`.
-6. Choose exactly one highest-priority item that is still `pending`, `in_progress`, or `blocked`.
-
-If the smoke step fails, fix the broken baseline before implementing a new feature slice.
-
-## Session Rules
-
-- Work on one feature or task slice at a time.
-- Keep the feature list machine-readable and stable. Update status, notes, files, and verification fields instead of rewriting unrelated items.
-- Only mark an item verified after running the command or check listed in that item.
-- Use spawned agents for bounded slices, not for overall task-state ownership.
-- When a child agent owns one item, give it the exact item id, acceptance criteria, and files it may touch.
-
-## Session End Checklist
-
-1. Append a short progress entry to `progress.md`.
-2. Update the touched item in `feature-list.json`.
-3. Record the exact commands run for verification.
-4. Capture blockers, follow-ups, and the next best item to resume.
-
-## Recommended Progress Entry Shape
-
-```markdown
-## 2026-04-24 14:30
-
-- Item: F003
-- Summary: Updated cache-key tests to cover prompt changes.
-- Files: `src/index.ts`, `tests/challenge.test.ts`
-- Verification: `corepack yarn test`, `corepack yarn type-check`
-- Blockers: none
-- Next: Run full build and format check.
-```
+On resumption, inspect the current diff and relevant source before acting. Reuse verification for unchanged work and run only affected checks after new edits. Do not start a dev server or install dependencies solely to update the handoff.
 ```
 
 ---
@@ -640,14 +546,14 @@ git show <commit-hash> -- src/index.ts
 3. Reproduce with the narrowest check:
 
 ```bash
-corepack yarn test -- tests/challenge.test.ts
+corepack yarn exec vitest run --maxWorkers=2 tests/challenge.test.ts
 ```
 
 4. Fix after understanding the history context, then run the required verification from `AGENTS.md`.
 
 ## Troubleshooting Rule
 
-When blocked, search current docs or package issue trackers for recent fixes/workarounds, especially for provider API response shapes, `pkc-js` challenge types, Zod behavior, or Yarn 4 behavior.
+Consult current official documentation or package issue trackers when a concrete provider/API or dependency question blocks progress. Report missing private source or user-only reproduction steps precisely; continue independent work.
 ```
 
 ---
@@ -657,49 +563,28 @@ When blocked, search current docs or package issue trackers for recent fixes/wor
 Source: https://github.com/bitsocialnet/ai-moderation-challenge/blob/master/docs/agent-playbooks/skills-and-tools.md
 
 ```markdown
-# Skills and Tools
+# Skills and tools
 
-Use this playbook when setting up or adjusting skills and external tooling.
+Shared source files avoid hand-maintained copies while preserving each app’s native discovery paths.
 
-## Repo-Managed Skills
+| Content              | Edited source                                 | App-loaded output                                                                                                                 |
+| -------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Skills               | `.agents/skills/<name>/`                      | Codex and Cursor use this path; Claude uses generated `.claude/skills/<name>/` copies.                                            |
+| Custom agents        | `.agents/roles/<name>.md`                     | Generated `.codex/agents/<name>.toml`, `.cursor/agents/<name>.md`, and `.claude/agents/<name>.md`.                                |
+| Project instructions | `AGENTS.md` and scoped directory instructions | Codex/Cursor read AGENTS.md; `CLAUDE.md` imports `@AGENTS.md` for Claude. Existing nested CLAUDE.md imports remain where present. |
+| Hooks                | Shared formatter and native entrypoints       | `.codex/hooks.json`, `.cursor/hooks.json`, `.claude/settings.json`.                                                               |
 
-This repository mirrors compatible skills under:
+`.agents/roles` is a repository-specific generator schema, not an app standard. Its supported fields are `name`, `description`, and optional `sandbox-mode`. No repository field selects models or reasoning effort; runtime invocation, configured defaults, or parent inheritance decide. This does not promise automatic selection of the best current model.
 
-- `.codex/skills/`
-- `.cursor/skills/`
-- `.claude/skills/`
+Read-only roles map to Codex `sandbox_mode`, Cursor `readonly`, and Claude tool restrictions. These controls have different semantics; Claude's Bash availability is not an OS sandbox. Parent assignments still define scope.
 
-When updating a shared skill, keep the three copies aligned unless a harness requires a different config format.
+After editing sources, run `corepack yarn ai-workflow:sync`, `corepack yarn ai-workflow:check`, and `corepack yarn ai-workflow:test`. Review and commit generated outputs together. Sync does not silently delete obsolete files; remove obsolete task-owned outputs explicitly and let validation detect drift. Skills are portable copies, not symlinks.
 
-## Recommended Skills
+Keep descriptions short and discriminating; place conditional procedures in linked references. Preserve domain-specific requirements rather than copying another product’s policy. Avoid compulsory agent chains, full tests for wording edits, unconditional external skill installs, and extra approval gates. Built-in worker/explorer roles handle general implementation; retained custom agents cover concrete independent review or domain tasks.
 
-### Context7
+Official references, checked 2026-09-12: [Codex skills](https://learn.chatgpt.com/docs/build-skills), [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), [Cursor skills](https://cursor.com/docs/skills), [Cursor subagents](https://cursor.com/docs/subagents), [Cursor rules](https://cursor.com/docs/rules), [Claude skills](https://code.claude.com/docs/en/skills), [Claude subagents](https://code.claude.com/docs/en/sub-agents), and [Claude imports](https://code.claude.com/docs/en/memory). Cursor supports both shared and compatibility skill roots; its documentation does not establish deduplication behavior for identical skills discovered in both. Generator/schema checks are separate from live app discovery and delegation tests.
 
-Use Context7 for up-to-date docs on libraries such as Zod, Vitest, TypeScript, release-it, and provider SDKs.
-
-```bash
-npx skills add https://github.com/intellectronica/agent-skills --skill context7
-```
-
-### Find Skills
-
-Use this to discover/install skills from the open ecosystem when a contributor asks for specialized help.
-
-```bash
-npx skills add https://github.com/vercel-labs/skills --skill find-skills
-```
-
-### Debug Agent
-
-Use the debug-agent workflow only when a bug needs runtime evidence. For this package, prefer a focused Vitest reproduction or a small Node script over live provider calls.
-
-## Tool Policy Rationale
-
-Avoid GitHub MCP for this project because it adds significant tool-schema/context overhead.
-
-- GitHub operations: use `gh` CLI.
-- Provider/API documentation: use official docs or Context7 where available.
-- Runtime reproduction: prefer Vitest with stubbed `fetch`; do not call live moderation providers unless the user explicitly asks.
+Maintenance approach: [OpenAI’s guidance on skills and prompts for GPT-6 Astra](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra). Keep useful guidance for other contributors and models while reducing redundant workflow instructions.
 ```
 
 ---
@@ -710,6 +595,13 @@ Source: https://github.com/bitsocialnet/ai-moderation-challenge/blob/master/CHAN
 
 ```markdown
 # Changelog
+
+## [0.3.1](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.3.0...v0.3.1) (2026-09-05)
+
+### Bug Fixes
+
+- **challenge:** allow reasoning reviewers more response time ([#17](https://github.com/bitsocialnet/ai-moderation-challenge/issues/17)) ([f458639](https://github.com/bitsocialnet/ai-moderation-challenge/commit/f45863974f47f8c88a4f68fe3111028f239891e0))
+- **deps:** remediate Dependabot alerts [skip github-alerts] ([5b4c900](https://github.com/bitsocialnet/ai-moderation-challenge/commit/5b4c900c8dafd12b5d43511e20f0126c48dfd579))
 
 ## [0.3.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.2.1...v0.3.0) (2026-09-02)
 

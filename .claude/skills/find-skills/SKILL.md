@@ -1,36 +1,18 @@
 ---
 name: find-skills
-description: Helps users discover and install agent skills when they ask questions like "how do I do X", "find a skill for X", "is there a skill that can...", or express interest in extending capabilities.
+description: Find reusable agent skills when the user requests a new skill or capability.
 ---
+
+<!-- Generated from .agents/skills/find-skills/SKILL.md; run yarn ai-workflow:sync. -->
 
 # Find Skills
 
-Use this when the user is looking for functionality that might exist as an installable skill.
+Use the capabilities already available for ordinary coding, debugging, documentation, and review requests. Do not start a skill search solely because the request mentions one of those domains.
 
-## Workflow
+When the user asks for a new skill:
 
-1. Identify the domain and task.
-2. Search:
-
-    ```bash
-    npx skills find <query>
-    ```
-
-3. Present relevant options with install commands.
-4. If the user wants installation, install with:
-
-    ```bash
-    npx skills add <owner/repo@skill> -g -y
-    ```
-
-## Common Searches
-
-- `typescript testing`
-- `vitest`
-- `release notes`
-- `security review`
-- `github pr review`
-
-## When No Skill Is Found
-
-Say no matching skill was found and proceed with the task directly if it is still within scope.
+1. Check the current skill catalog for an existing match.
+2. Search the requested source or the skills ecosystem for the specific missing workflow. Prefer official, maintained sources and inspect instructions before recommending installation.
+3. Explain what useful capability the skill adds, its source, and any required tools. Avoid installing a duplicate of a repository-managed skill.
+4. Install only when requested, using the current harness's installer. Keep shared repository skills in the canonical source and regenerate compatibility outputs.
+5. If nothing suitable exists, perform the task with available tools when possible. Do not ask again for permission to do work the user already requested.

@@ -1,39 +1,12 @@
 ---
 name: release-description
-description: Draft a concise release summary by analyzing commit titles since the last git tag. Use when the user asks to update release notes, prepare a release summary, or summarize changes for a version.
+description: Draft a concise release summary when release wording is requested.
 ---
+
+<!-- Generated from .agents/skills/release-description/SKILL.md; run yarn ai-workflow:sync. -->
 
 # Release Description
 
-## Steps
+Inspect the relevant release tag and commits since it. Write one plain-language sentence about user-visible changes, mentioning moderation behavior, provider compatibility, privacy, caching, or publishing only when they changed.
 
-1. Find the latest release tag:
-
-    ```bash
-    git tag --sort=-creatordate | head -1
-    ```
-
-2. List commit titles since that tag:
-
-    ```bash
-    git log --oneline <tag>..HEAD
-    ```
-
-3. Categorize commits:
-
-    | Prefix                   | Category         |
-    | ------------------------ | ---------------- |
-    | `feat`                   | New behavior     |
-    | `fix`                    | Bug fixes        |
-    | `perf`                   | Performance      |
-    | `refactor`               | Internal cleanup |
-    | `docs`                   | Documentation    |
-    | `chore`, `build`, `test` | Maintenance      |
-
-4. Write a concise, user-facing summary:
-    - One sentence.
-    - Plain language.
-    - Mention moderation behavior, provider compatibility, privacy, caching, or publishing only when those changed.
-    - Do not mention every commit.
-
-5. If the user wants it written into release materials, update the relevant changelog or GitHub release draft after confirming where it should live.
+A draft stays in the response. Edit release materials only within the requested scope; this skill does not authorize a release, commit, tag, or push.
