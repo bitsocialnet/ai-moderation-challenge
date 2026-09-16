@@ -287,6 +287,7 @@ Agents may use compiled context to navigate quickly, but must verify against sou
 | Release                                                             | Use the release skill within the requested preview/preparation/publication boundary.                 |
 | Durable handoff/resumption                                          | Use `docs/agent-playbooks/long-running-agent-workflow.md`.                                           |
 | Requested PR review or merge                                        | Use `review-and-merge-pr` within the authorized scope.                                               |
+| Bug fix or substantive review correction exposes a preventable mistake | Use [retro](.agents/skills/retro/SKILL.md) before finishing; preserve review-only scope. |
 
 ## Stack
 
