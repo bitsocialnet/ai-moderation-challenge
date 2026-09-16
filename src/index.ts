@@ -622,7 +622,7 @@ const sanitizeVerdict = (verdict: ModelVerdict, target: PublicationTarget): Mode
     reason: redactReason(verdict.reason, target)
 });
 
-const AI_MODERATION_APP_URL = "https://bitsocial.net/apps/ai-moderation-challenge";
+const AI_MODERATION_APP_URL = "https://bitsocial.net/projects/ai-moderation-challenge";
 const aiModerationLink = `[AI moderation](${AI_MODERATION_APP_URL})`;
 
 const getPendingApprovalTargetLabel = (targetKind: PublicationTarget["kind"]) => {

@@ -538,7 +538,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(reviewResult).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because no spam ([rule #1](/rules#spam))"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because no spam ([rule #1](/rules#spam))"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -580,7 +580,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(result).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the post appears unrelated to animals or nature as defined by the board topic rule ([rule #1](/rules#an))"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because the post appears unrelated to animals or nature as defined by the board topic rule ([rule #1](/rules#an))"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -614,7 +614,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(result).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the post appears unrelated to animals or nature as defined by [board topic rule #1](/rules#an)"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because the post appears unrelated to animals or nature as defined by [board topic rule #1](/rules#an)"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -641,7 +641,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(result).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because quoted [content] in the reason"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because quoted [content] in the reason"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -989,7 +989,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(reviewResult).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -1752,7 +1752,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(result).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because content does not pertain to fashion or apparel ([rule #1](/rules#fa))"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because content does not pertain to fashion or apparel ([rule #1](/rules#fa))"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -2192,7 +2192,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(reviewResult).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -2309,7 +2309,7 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(reviewResult).toEqual({
             success: true,
             commentUpdate: {
-                reason: "[AI moderation](https://bitsocial.net/apps/ai-moderation-challenge) sent this reply to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this reply to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
             }
         });
         expect(fetchMock).toHaveBeenCalledTimes(2);
