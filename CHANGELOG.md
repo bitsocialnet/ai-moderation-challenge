@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.4.0...v0.5.0) (2026-09-18)
+
+### Features
+
+- **moderation:** enforce configured article age and add evaluation tools ([#19](https://github.com/bitsocialnet/ai-moderation-challenge/issues/19)) ([01caaa3](https://github.com/bitsocialnet/ai-moderation-challenge/commit/01caaa3f3a0daabaccbf88a332c9f48e618ff763))
+
 ## [0.4.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.3.1...v0.4.0) (2026-09-18)
 
 ### Features
