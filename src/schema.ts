@@ -50,6 +50,7 @@ export type ParsedOptions = {
     cachePath?: string;
     auditLogPath?: string;
     rejectDuplicateMedia: boolean;
+    articleMaxAgeHours?: number;
     error: string;
 };
 
@@ -210,6 +211,10 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                     (value) => resolveOptionalOptionString(value, "auditLogPath", { emptyStringDisablesDefault: true }),
                     z.string().optional()
                 ),
+                articleMaxAgeHours: z.preprocess((value) => {
+                    const resolved = resolveOptionalOptionString(value, "articleMaxAgeHours");
+                    return typeof resolved === "string" ? Number(resolved) : resolved;
+                }, z.number().finite().positive().max(876_000).optional()),
                 rejectDuplicateMedia: z.preprocess((value) => resolveOptionBoolean(value, "rejectDuplicateMedia"), z.boolean()),
                 error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
             })

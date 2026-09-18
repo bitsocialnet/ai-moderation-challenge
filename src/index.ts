@@ -11,6 +11,7 @@ import type {
 } from "@pkcprotocol/pkc-js/dist/node/community/types.js";
 import { createJevRequestBody, parseJevResponse } from "./jev.js";
 import { getProviderUsage, type ProviderUsage } from "./provider-usage.js";
+import { getArticleRecency, type ArticleRecency } from "./recency.js";
 import Logger from "@pkcprotocol/pkc-logger";
 import {
     DEFAULT_CACHE_PATH,
@@ -295,6 +296,13 @@ const optionInputs = [
         placeholder: "~/.bitsocial-ai-moderation-cache.json"
     },
     {
+        option: "articleMaxAgeHours",
+        label: "Maximum linked article age (hours)",
+        default: "",
+        description: "Optional top-level article-link age limit, using URL-path dates; empty disables deterministic enforcement",
+        placeholder: "48"
+    },
+    {
         option: "auditLogPath",
         label: "Audit log path",
         default: DEFAULT_AUDIT_LOG_PATH,
@@ -386,6 +394,7 @@ type PublicationTarget = {
 
 type ModelPublicationTarget = Pick<PublicationTarget, "kind" | "content" | "title" | "link" | "flags" | "flairs"> & {
     submittedAt?: ModelSubmittedAt;
+    articleRecency?: ArticleRecency;
 };
 
 type ModerationTarget = {
@@ -799,8 +808,16 @@ const getModelSubmittedAt = (timestamp: number | undefined): ModelSubmittedAt | 
     };
 };
 
-const getModelPublicationTarget = (target: PublicationTarget): ModelPublicationTarget => {
+const getModelPublicationTarget = (target: PublicationTarget, articleMaxAgeHours?: number): ModelPublicationTarget => {
     const submittedAt = getModelSubmittedAt(target.timestamp);
+    const articleRecency = getArticleRecency({
+        kind: target.kind,
+        htmlTagName: target.link?.htmlTagName,
+        hasLink: Boolean(target.link),
+        submittedAtSeconds: submittedAt?.unixSeconds,
+        dateHint: target.link?.dateHint,
+        maxAgeHours: articleMaxAgeHours
+    });
     return {
         kind: target.kind,
         content: target.content,
@@ -808,7 +825,8 @@ const getModelPublicationTarget = (target: PublicationTarget): ModelPublicationT
         link: target.link,
         flags: target.flags,
         flairs: target.flairs,
-        ...(submittedAt ? { submittedAt } : {})
+        ...(submittedAt ? { submittedAt } : {}),
+        ...(articleRecency ? { articleRecency } : {})
     };
 };
 
@@ -825,7 +843,7 @@ const createAuditEntry = ({
     providerStage = "reviewer",
     attempts
 }: {
-    source: "provider" | "cache";
+    source: "provider" | "cache" | "rule";
     cacheKey: string;
     options: ParsedOptions;
     promptHash: string;
@@ -850,20 +868,25 @@ const createAuditEntry = ({
         source,
         action: verdict ? (verdict.verdict === "allow" ? "approved" : "queued_for_review") : "moderation_error",
         cacheKey,
-        provider: {
-            stage: provider.stage,
-            apiHost: (() => {
-                try {
-                    return new URL(provider.apiUrl).hostname;
-                } catch {
-                    return undefined;
-                }
-            })(),
-            apiFormat: provider.apiFormat,
-            model: resolvedProviderModel,
-            ...(provider.reasoningEffort ? { reasoningEffort: provider.reasoningEffort } : {}),
-            ...(provider.stage === "reviewer" && resolvedProviderModel !== provider.model ? { fallbackFromModel: provider.model } : {})
-        },
+        provider:
+            source === "rule"
+                ? undefined
+                : {
+                      stage: provider.stage,
+                      apiHost: (() => {
+                          try {
+                              return new URL(provider.apiUrl).hostname;
+                          } catch {
+                              return undefined;
+                          }
+                      })(),
+                      apiFormat: provider.apiFormat,
+                      model: resolvedProviderModel,
+                      ...(provider.reasoningEffort ? { reasoningEffort: provider.reasoningEffort } : {}),
+                      ...(provider.stage === "reviewer" && resolvedProviderModel !== provider.model
+                          ? { fallbackFromModel: provider.model }
+                          : {})
+                  },
         promptHash,
         community: {
             address: communityContext.address,
@@ -1613,7 +1636,18 @@ const loadSystemPrompt = async (options: ParsedOptions) => {
 };
 
 const getUserPromptInstructions = (target: ModelPublicationTarget) =>
-    target.kind === "reply" ? `${BASE_USER_PROMPT_INSTRUCTIONS} ${REPLY_USER_PROMPT_INSTRUCTIONS}` : BASE_USER_PROMPT_INSTRUCTIONS;
+    [
+        BASE_USER_PROMPT_INSTRUCTIONS,
+        target.articleRecency
+            ? "The node calculated publication.articleRecency age bounds; use those numbers instead of subtracting dates."
+            : "",
+        target.articleRecency?.maxAgeSeconds !== undefined
+            ? "The node already enforced the configured article age window. Do not review for article age alone; uncertain or missing dates are permitted. Continue checking all other rules."
+            : "",
+        target.kind === "reply" ? REPLY_USER_PROMPT_INSTRUCTIONS : ""
+    ]
+        .filter(Boolean)
+        .join(" ");
 
 const createUserPromptPayload = (communityContext: CommunityContext, target: ModelPublicationTarget) => ({
     instructions: getUserPromptInstructions(target),
@@ -2186,7 +2220,7 @@ const evaluate = async ({
     const baseSystemPrompt = await loadSystemPrompt(options);
     const systemPrompt = getSystemPrompt(baseSystemPrompt, communityContext, target);
     const promptHash = sha256(systemPrompt);
-    const modelTarget = getModelPublicationTarget(target);
+    const modelTarget = getModelPublicationTarget(target, options.articleMaxAgeHours);
     const cacheKey = sha256(
         stableStringify({
             apiUrl: options.apiUrl,
@@ -2219,6 +2253,25 @@ const evaluate = async ({
     const cached = evaluateCache.get(cacheKey);
     if (cached) {
         return cached;
+    }
+
+    if (modelTarget.articleRecency?.status === "outside-window") {
+        const verdict: ModelVerdict = {
+            verdict: "review",
+            reason: `the linked article appears older than the configured ${options.articleMaxAgeHours}-hour window`,
+            matchedRuleIndexes: []
+        };
+        const result = Promise.resolve(verdict);
+        addCachedPromise(cacheKey, result);
+        await writeAuditLogEntry({
+            auditLogPath: options.auditLogPath,
+            entry: {
+                ...createAuditEntry({ source: "rule", cacheKey, options, promptHash, communityContext, target, verdict }),
+                rule: "article-recency",
+                articleRecency: modelTarget.articleRecency
+            }
+        });
+        return verdict;
     }
 
     const cachedEntry = await getCachedVerdictFromJson(options.cachePath, cacheKey);
