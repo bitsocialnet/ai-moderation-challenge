@@ -984,7 +984,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         expect(allowResult).toEqual({
             success: false,
-            error: 'AI moderation API error (503): {"error":"reviewer unavailable"}'
+            error: "AI moderation API error (503)"
         });
         expect(reviewResult).toEqual({
             success: true,
@@ -2333,7 +2333,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         expect(result).toEqual({
             success: false,
-            error: 'AI moderation API error (400): {"error":"bad request"}'
+            error: "AI moderation API error (400)"
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
@@ -2358,7 +2358,7 @@ describe("Bitsocial AI moderation challenge package", () => {
 
         expect(allowResult).toEqual({
             success: false,
-            error: 'AI moderation API error (429): {"error":"rate limited"}'
+            error: "AI moderation API error (429)"
         });
         expect(reviewResult).toEqual({ success: true });
         expect(fetchMock).toHaveBeenCalledTimes(1);

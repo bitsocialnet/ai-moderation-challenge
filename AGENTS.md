@@ -47,17 +47,17 @@ Agents may use compiled context to navigate quickly, but must verify against sou
 
 ## Task router
 
-| Change                                                              | Guidance                                                                                             |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Runtime `src/**`                                                    | Read `src/AGENTS.md`; choose checks with `docs/agent-playbooks/verification.md`.                     |
-| Tests                                                               | Read `tests/AGENTS.md`; run the affected tests.                                                      |
-| Provider parsing, prompts, cache keys, secrets, or branch semantics | Add focused Vitest coverage; use the moderation-reviewer checklist when a separate review is useful. |
-| Dependency manifest                                                 | Run `corepack yarn install` and include the lockfile.                                                |
-| Public docs or AI context                                           | Run `corepack yarn llms:generate` and include `llms*.txt`.                                           |
-| Release                                                             | Use the release skill within the requested preview/preparation/publication boundary.                 |
-| Durable handoff/resumption                                          | Use `docs/agent-playbooks/long-running-agent-workflow.md`.                                           |
-| Requested PR review or merge                                        | Use `review-and-merge-pr` within the authorized scope.                                               |
-| Bug fix or substantive review correction exposes a preventable mistake | Use [retro](.agents/skills/retro/SKILL.md) before finishing; preserve review-only scope. |
+| Change                                                                 | Guidance                                                                                             |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Runtime `src/**`                                                       | Read `src/AGENTS.md`; choose checks with `docs/agent-playbooks/verification.md`.                     |
+| Tests                                                                  | Read `tests/AGENTS.md`; run the affected tests.                                                      |
+| Provider parsing, prompts, cache keys, secrets, or branch semantics    | Add focused Vitest coverage; use the moderation-reviewer checklist when a separate review is useful. |
+| Dependency manifest                                                    | Run `corepack yarn install` and include the lockfile.                                                |
+| Public docs or AI context                                              | Run `corepack yarn llms:generate` and include `llms*.txt`.                                           |
+| Release                                                                | Use the release skill within the requested preview/preparation/publication boundary.                 |
+| Durable handoff/resumption                                             | Use `docs/agent-playbooks/long-running-agent-workflow.md`.                                           |
+| Requested PR review or merge                                           | Use `review-and-merge-pr` within the authorized scope.                                               |
+| Bug fix or substantive review correction exposes a preventable mistake | Use [retro](.agents/skills/retro/SKILL.md) before finishing; preserve review-only scope.             |
 
 ## Stack
 

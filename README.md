@@ -2,7 +2,7 @@
 
 # @bitsocial/ai-moderation-challenge
 
-Automatic PKC challenge that evaluates Bitsocial comment content against `community.rules` with an OpenAI-compatible model endpoint. The package runs on the community node and does not require a hosted Bitsocial moderation server.
+Automatic PKC challenge that evaluates Bitsocial comment content against `community.rules` with an OpenAI-compatible model endpoint and optional TypeSafe Jev triage. The package runs on the community node and does not require a hosted Bitsocial moderation server.
 
 ## Installation
 
@@ -61,28 +61,33 @@ Production operators should keep the real moderation prompt in a private node-lo
 
 ## Options
 
-| Option                  | Default                                  | Description                                                                                                    |
-| ----------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `apiUrl`                | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
-| `apiFormat`             | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
-| `apiKey`                | none                                     | Private provider API key; leave empty for self-hosted endpoints that do not require one                        |
-| `model`                 | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
-| `fallbackModel`         | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
-| `reasoningEffort`       | none                                     | Optional primary-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                    |
-| `triageApiUrl`          | `https://api.openai.com/v1/responses`    | Full endpoint URL for the optional first-pass triage model                                                     |
-| `triageApiFormat`       | `responses`                              | Triage request/response format: `responses` or `chat-completions`                                              |
-| `triageApiKey`          | none                                     | Private triage-provider API key                                                                                |
-| `triageModel`           | none                                     | Optional first-pass model; setting it enables the two-stage cascade                                            |
-| `triageReasoningEffort` | none                                     | Optional triage-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                     |
-| `branch`                | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
-| `prompt`                | built-in prompt                          | Private inline system prompt text                                                                              |
-| `promptPath`            | none                                     | Private file path for a system prompt on the community node; `~` expands to the home directory                 |
-| `promptUrl`             | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
-| `promptBearerToken`     | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
-| `cachePath`             | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
-| `auditLogPath`          | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
-| `rejectDuplicateMedia`  | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
-| `error`                 | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
+| Option                    | Default                                  | Description                                                                                                    |
+| ------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `apiUrl`                  | `https://api.openai.com/v1/responses`    | Full OpenAI-compatible endpoint URL                                                                            |
+| `apiFormat`               | `responses`                              | Request/response format: `responses` or `chat-completions`                                                     |
+| `apiKey`                  | none                                     | Private provider API key; leave empty for self-hosted endpoints that do not require one                        |
+| `model`                   | `gpt-5.4-nano`                           | Model name sent to the provider                                                                                |
+| `fallbackModel`           | none                                     | Secondary model used once when the primary model returns HTTP 429                                              |
+| `reasoningEffort`         | none                                     | Optional primary-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                    |
+| `triageApiUrl`            | `https://api.openai.com/v1/responses`    | Full endpoint URL for the optional first-pass triage model                                                     |
+| `triageApiFormat`         | `responses`                              | Triage request/response format: `responses` or `chat-completions`                                              |
+| `triageApiKey`            | none                                     | Private triage-provider API key                                                                                |
+| `triageModel`             | none                                     | Optional first-pass model; setting it enables the two-stage cascade                                            |
+| `triageReasoningEffort`   | none                                     | Optional triage-model reasoning effort: `none`, `low`, `medium`, `high`, `xhigh`, or `max`                     |
+| `jevMode`                 | `off`                                    | `off`, non-blocking `shadow`, or confidence-gated `triage` before the existing cascade                         |
+| `jevApiUrl`               | `https://api.typesafe.ai/v1/systemone`   | HTTPS TypeSafe evaluation endpoint                                                                             |
+| `jevApiKey`               | none                                     | Private TypeSafe key; required when Jev is enabled                                                             |
+| `jevModel`                | `jev-1.13.0`                             | Pinned Jev model; an unexpected returned version falls back to the existing cascade                            |
+| `jevMaxReviewProbability` | `0.05`                                   | Maximum review probability for a Jev `allow` to finish triage; must be at least 0 and below 0.5                |
+| `branch`                  | `allow`                                  | Branch mode: `allow` or `review`                                                                               |
+| `prompt`                  | built-in prompt                          | Private inline system prompt text                                                                              |
+| `promptPath`              | none                                     | Private file path for a system prompt on the community node; `~` expands to the home directory                 |
+| `promptUrl`               | none                                     | Private HTTPS URL for a remotely hosted system prompt                                                          |
+| `promptBearerToken`       | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
+| `cachePath`               | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
+| `auditLogPath`            | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
+| `rejectDuplicateMedia`    | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
+| `error`                   | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
 
 Prompt source precedence is `prompt` > `promptPath` > `promptUrl` > built-in fallback. If multiple private prompt sources are configured, the challenge uses the highest-precedence source and emits a warning about the ignored source.
 
@@ -109,16 +114,43 @@ Provider API keys are only sent to HTTPS endpoints. Keyless HTTP endpoints remai
 
 To enable 5chan-style exact-media rejection, set `rejectDuplicateMedia: "true"` on both the `allow` and `review` challenge entries. PKC challenge option values are strings; leaving this option unset preserves the default and does not perform the deterministic hard-rejection check.
 
+## Optional Jev triage
+
+Keep the existing Luna and Grok configuration. Add the same Jev options to both AI challenge branches:
+
+```js
+{
+    jevMode: "shadow",
+    jevApiKey: "your-private-typesafe-key",
+    jevModel: "jev-1.13.0",
+    jevMaxReviewProbability: "0.05"
+}
+```
+
+`off` is the default and makes no Jev requests. `shadow` starts one Jev request alongside the existing cascade on each cache miss. Its result never changes publication or moderation outcomes, and the posting path does not wait for it. Shadow mode requires audit logging. A separate `${auditLogPath}.jev-shadow.jsonl` file records the Jev decision/probability, whether it would have allowed, the final baseline verdict or failure, correlation hashes, timing, and usage. These advisory entries never enter the normal mod-log publisher's input. Writes are best effort; a process stopped before the background comparison finishes can lose that observation. Cache hits issue no shadow request.
+
+After evaluating disagreements and cost on representative traffic, explicitly set `jevMode: "triage"` to enable early approvals. A schema-valid Jev `allow` with review probability at or below the threshold finishes moderation. Every other result, including a Jev `review`, uncertainty, invalid response, unexpected pinned model, or provider failure, continues through the existing Luna-to-Grok cascade. Jev never independently queues a publication or invents a free-text review reason. If Luna is not configured, these cases go directly to the configured reviewer. The existing branch, edit, and provider-failure rules still apply.
+
+Jev requests have a two-second deadline covering headers and body. The threshold is an experimental operating choice, not a guaranteed error rate. Start with shadow mode, adjudicate disagreements, and measure false approvals and escalation rates before enabling decisions. Pin a version while selecting a threshold; explicitly choosing `jev-latest` or `jev-preview` permits the provider alias to change versions. Jev mode, endpoint, model, and threshold participate in cache identity, so changing them cannot reuse a verdict under a different decision policy. Credentials never enter the cache.
+
+The [TypeSafe API](https://docs.typesafe.ai/api) receives the same normalized policy, user instructions, community context, and publication fields as the existing providers. Publication text remains untrusted data. No linked pages or media are fetched.
+
+### Provider usage and latency
+
+Fresh final audit entries include an `attempts` array for every actual decision-provider request, including first-pass reviews, invalid verdicts, timeouts, 429 attempts, and fallback retries. Each attempt records stage, requested/returned model when available, host, format, start time, elapsed milliseconds, status, and reported token usage. Jev triage attempts also record the review probability, confidence, configured threshold, and eligibility for early approval. Cache-hit entries omit attempts so they cannot be mistaken for new provider usage. Shadow Jev attempts appear only in the separate shadow file.
+
+Usage fields are `inputTokens`, `outputTokens`, `cachedInputTokens`, `cacheWriteInputTokens`, and `reasoningTokens` when the provider supplies valid values. Missing usage is unknown, not zero. Reasoning is preserved separately: providers differ in whether it is included in output/completion counts, so do not blindly add it or infer a dollar bill from these fields. Prices are not hardcoded. HTTP errors record the status without copying provider bodies that could echo private content. The mod-log publisher retains its existing public fields and does not publish attempt telemetry.
+
 ## Settings validation and public options
 
 `pkc-js` 0.0.85+ validates `community.settings.challenges[i]` on every community edit, creation, and start. For this challenge that means:
 
 - Option keys that are not listed in the table above are rejected as typos by `pkc-js` itself.
-- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` or `triageApiUrl` that is not `http`/`https`, a keyed provider URL that is not HTTPS, a `promptUrl` that is not `https`, an unknown API format, reasoning effort, or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts a provider, so a missing or wrong API key is only discovered when a publication is moderated (fail closed).
+- The challenge's `validateChallengeSettings` hook rejects the same option errors that would otherwise fail every publication: an `apiUrl` or `triageApiUrl` that is not `http`/`https`, a keyed provider URL that is not HTTPS, a `promptUrl` that is not `https`, an unknown API format, reasoning effort, or `branch`, or a `rejectDuplicateMedia` value other than `true`/`false`. The hook is synchronous and never contacts a provider, so wrong credentials are only discovered when a publication is moderated (fail closed). Enabling Jev also requires `jevApiKey`, a valid mode/threshold and an HTTPS endpoint; shadow mode requires `auditLogPath`.
 - If `promptPath` does not exist on the node, the hook logs it through `pkc-logger` but does not reject the settings, so a prompt file that is created later does not block the community.
 - Rejections fail the offending `community.edit()`; at start they surface as community `error` events with code `ERR_CHALLENGE_SETTINGS_VALIDATION_FAILED` and the community still starts. Existing settings that were silently broken start emitting these errors after upgrading.
 
-Every option is private by default. An owner can publish specific options by naming them in `publicOptions`, and `pkc-js` then copies their values into the public `community.challenges[i].publicOptions`. The hook refuses to publish `apiKey`, `triageApiKey`, and `promptBearerToken` because they are credentials. Everything else is the owner's call: publishing `prompt`, `promptUrl`, or `promptPath` is a transparency choice, but it lets users read the moderation prompt and try to game it, and publishing provider URLs, `cachePath`, or `auditLogPath` reveals private node details. Most communities should leave `publicOptions` unset.
+Every option is private by default. An owner can publish specific options by naming them in `publicOptions`, and `pkc-js` then copies their values into the public `community.challenges[i].publicOptions`. The hook refuses to publish `apiKey`, `triageApiKey`, `jevApiKey`, and `promptBearerToken` because they are credentials. Everything else is the owner's call: publishing `prompt`, `promptUrl`, or `promptPath` is a transparency choice, but it lets users read the moderation prompt and try to game it, and publishing provider URLs, `cachePath`, or `auditLogPath` reveals private node details. Most communities should leave `publicOptions` unset.
 
 ```js
 {
@@ -146,7 +178,7 @@ Every option is private by default. An owner can publish specific options by nam
 - The challenge does not fetch linked publication media or user-submitted URLs. `promptUrl` is an operator-configured private prompt source, not publication content.
 - Remote prompts are fetched without following redirects, with a 5 second timeout, capped at 64 KiB, cached in memory for 5 minutes, and reused from the last in-memory copy if a refresh fails. If the first remote prompt fetch fails, moderation fails closed for the allow branch.
 - Two branch invocations for the same publication reuse one in-process verdict promise.
-- Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over primary and triage model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API keys.
+- Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over primary, triage, and enabled Jev model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API keys.
 - Verdicts are written to a private JSONL audit log with the model stage, model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt, API keys, prompt URL, or prompt bearer token.
 
 ## Moderation Audit Community
