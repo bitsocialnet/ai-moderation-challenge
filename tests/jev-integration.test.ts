@@ -356,6 +356,15 @@ describe("Jev moderation integration", () => {
         expect(await readFile(`${path}.jev-shadow.jsonl`, "utf8")).not.toContain("synthetic-jev-key");
     });
 
+    it("normalizes the Jev endpoint for requests and cache identity", async () => {
+        const fetchMock = stubFetch(jev());
+        const publication = request();
+        await expect(evaluate({ jevMode: "triage", jevApiUrl: `${JEV_URL}///` }, publication)).resolves.toEqual({ success: true });
+        expect(fetchMock.mock.calls[0]?.[0]).toBe(JEV_URL);
+        await expect(evaluate({ jevMode: "triage", jevApiUrl: JEV_URL }, publication)).resolves.toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("shares the Jev verdict between branches and isolates caches by mode, model and threshold", async () => {
         const fetchMock = stubFetch(jev(), jev(), jev(0.01, "jev-other-version"), luna());
         const publication = request();

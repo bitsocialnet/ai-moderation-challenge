@@ -267,7 +267,11 @@ describe("private audit provider usage", () => {
         expect(entries[1]).toMatchObject({ source: "cache", action: "approved", provider: { model: "grok-4.6" } });
         expect(entries[1]).not.toHaveProperty("attempts");
         expect(entries[1]).not.toHaveProperty("usage");
-        expect(await readFile(join(tempDir, "cache.json"), "utf8")).not.toContain("inputTokens");
+        const cache = await readFile(join(tempDir, "cache.json"), "utf8");
+        for (const secret of ["cached reply", "private-policy-sentinel", "triage-private-key", "reviewer-private-key"]) {
+            expect(cache).not.toContain(secret);
+        }
+        expect(cache).not.toContain("inputTokens");
     });
 
     it("excludes secrets echoed by HTTP errors from the audit, result and logger", async () => {

@@ -171,7 +171,10 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 ),
                 jevMode: z.preprocess((value) => resolveOptionString(value, "jevMode"), z.enum(["off", "shadow", "triage"])),
                 jevApiUrl: z.preprocess(
-                    (value) => resolveOptionString(value, "jevApiUrl"),
+                    (value) => {
+                        const resolved = resolveOptionString(value, "jevApiUrl");
+                        return typeof resolved === "string" ? normalizeUrl(resolved) : resolved;
+                    },
                     z.url().refine(isHttpsUrl, { message: "Jev API URL must use https" })
                 ),
                 jevApiKey: z.preprocess((value) => resolveOptionalOptionString(value, "jevApiKey"), z.string().optional()),
