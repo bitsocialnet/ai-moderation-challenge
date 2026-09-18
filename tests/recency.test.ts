@@ -87,7 +87,8 @@ describe("deterministic configured article recency", () => {
             const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
             const payload = JSON.parse(body.input[1].content);
             expect(payload.publication.articleRecency.maxAgeSeconds).toBe(48 * 3600);
-            expect(payload.instructions).toContain("Do not review for article age alone");
+            expect(payload.instructions).toContain("Do not independently re-enforce that configured window");
+            expect(payload.instructions).toContain("including any stricter explicit article-age limit");
         }
     );
     it("does not invent a window from prose and separates configured cache identity", async () => {
@@ -97,6 +98,17 @@ describe("deterministic configured article recency", () => {
         expect(await evaluate({ articleMaxAgeHours: "48" }, publication)).toMatchObject({ success: false });
         expect(await evaluate({ articleMaxAgeHours: "240" }, publication)).toEqual({ success: true });
         expect(fetch).toHaveBeenCalledTimes(2);
+    });
+    it("preserves a stricter 48-hour community rule when the configured guard allows 240 hours", async () => {
+        const fetch = stub("review");
+        expect(await evaluate({ articleMaxAgeHours: "240" })).toMatchObject({ success: false });
+        const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body));
+        const payload = JSON.parse(body.input[1].content);
+        expect(payload.community.rules).toContain("Linked articles must be no more than 48 hours old.");
+        expect(payload.publication.articleRecency).toMatchObject({ maxAgeSeconds: 240 * 3600 });
+        expect(payload.publication.articleRecency.minimumAgeSeconds).toBeGreaterThan(48 * 3600);
+        expect(payload.instructions).toContain("Continue enforcing all community rules, including any stricter explicit article-age limit");
+        expect(payload.instructions).not.toContain("Do not review for article age alone");
     });
     it("leaves replies and media outside the top-level article setting", async () => {
         const fetch = stub();

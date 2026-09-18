@@ -26,6 +26,7 @@ const attempt = {
     elapsedMs: 20,
     usage: { inputTokens: 1000, outputTokens: 100, cachedInputTokens: 600, cacheWriteInputTokens: 200 }
 };
+const provider = { stage: "triage", apiHost: "provider.example", model: "model" };
 const corpus = {
     version: 1,
     cases: [
@@ -47,7 +48,7 @@ describe("offline moderation usage report", () => {
             version: 1,
             source: "provider",
             action: "approved",
-            provider: { stage: "triage" },
+            provider,
             publication: { content: "private publication" },
             apiKey: "private-key",
             attempts: [{ ...attempt, status: "error", httpStatus: 429, usage: undefined }, attempt]
@@ -57,10 +58,11 @@ describe("offline moderation usage report", () => {
             version: 1,
             source: "provider",
             action: "moderation_error",
+            provider,
             attempts: [{ ...attempt, status: "error", errorKind: "timeout", usage: undefined }]
         });
         report.add({ version: 1, source: "rule", action: "queued_for_review" });
-        report.add({ version: 1, source: "provider", action: "approved", provider: { stage: "reviewer" } });
+        report.add({ version: 1, source: "provider", action: "approved", provider: { ...provider, stage: "reviewer" } });
         const result = report.finish();
         expect(result).toMatchObject({
             auditedCacheHits: 1,
@@ -89,6 +91,33 @@ describe("offline moderation usage report", () => {
         expect(estimateCost({ ...attempt, usage: { ...attempt.usage, cachedInputTokens: 1001 } }, rates)).toBeUndefined();
         expect(() => validateRates({ ...rates, providers: [{ ...rates.providers[0], outputPerMillion: -1 }] })).toThrow();
         expect(() => validateRates({ ...rates, providers: [{ ...rates.providers[0], reasoningAccounting: "guess" }] })).toThrow();
+    });
+    it("ignores malformed audit records while retaining valid legacy provider entries", () => {
+        const report = createUsageReport();
+        for (const entry of [
+            { version: 1, source: "provider" },
+            { version: 1, source: "provider", action: "approved" },
+            { version: 1, source: "provider", action: "approved", provider: { stage: "triage" } },
+            { version: 1, source: "provider", action: "bogus", provider },
+            { version: 1, source: "cache" },
+            { version: 1, mode: "shadow" }
+        ])
+            report.add(entry);
+        report.add({ version: 1, source: "provider", action: "approved", provider });
+        report.add({
+            version: 1,
+            source: "provider",
+            action: "queued_for_review",
+            provider: { apiHost: "legacy.example", model: "legacy" }
+        });
+        expect(report.finish()).toMatchObject({
+            ignoredLines: 6,
+            auditEntries: 2,
+            providerDecisions: 2,
+            legacyEntriesWithoutAttempts: 2,
+            finishedAt: { triage: 1, unknown: 1 },
+            providers: []
+        });
     });
     it("keeps shadow usage separate from decision funnels and validates input lines", () => {
         const report = createUsageReport();
@@ -162,7 +191,13 @@ describe("repeatable moderation evaluation", () => {
                         if (calls++ === 0)
                             await writeFile(
                                 challengeSettings.options.auditLogPath,
-                                JSON.stringify({ version: 1, source: "provider", action: "queued_for_review", attempts: [attempt] }) + "\n"
+                                JSON.stringify({
+                                    version: 1,
+                                    source: "provider",
+                                    action: "queued_for_review",
+                                    provider,
+                                    attempts: [attempt]
+                                }) + "\n"
                             );
                         return { success: false };
                     }
@@ -194,6 +229,7 @@ describe("repeatable moderation evaluation", () => {
                                 version: 1,
                                 source: "provider",
                                 action: "moderation_error",
+                                provider,
                                 publication: "PRIVATE_CORPUS_TEXT",
                                 attempts: []
                             }) + "\n"

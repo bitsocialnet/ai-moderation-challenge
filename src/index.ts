@@ -1642,7 +1642,7 @@ const getUserPromptInstructions = (target: ModelPublicationTarget) =>
             ? "The node calculated publication.articleRecency age bounds; use those numbers instead of subtracting dates."
             : "",
         target.articleRecency?.maxAgeSeconds !== undefined
-            ? "The node already enforced the configured article age window. Do not review for article age alone; uncertain or missing dates are permitted. Continue checking all other rules."
+            ? "The node already enforced only the configured articleMaxAgeHours window. Do not independently re-enforce that configured window; uncertain or missing dates are permitted for that window. Continue enforcing all community rules, including any stricter explicit article-age limit, using the calculated age bounds."
             : "",
         target.kind === "reply" ? REPLY_USER_PROMPT_INSTRUCTIONS : ""
     ]

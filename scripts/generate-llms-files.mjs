@@ -196,7 +196,16 @@ function summaryFromMarkdown(content) {
     if (current.length > 0) paragraphs.push(current.join(" "));
 
     const summary = paragraphs.find(Boolean) || "Repository documentation.";
-    return summary.length > 220 ? `${summary.slice(0, 217).trimEnd()}...` : summary;
+    if (summary.length <= 220) return summary;
+    let end = 217;
+    for (const match of summary.matchAll(/\[[^\]\n]*\]\([^\)\n]*\)/g)) {
+        if (match.index < end && match.index + match[0].length > end) end = match.index;
+    }
+    return `${summary
+        .slice(0, end)
+        .trimEnd()
+        .replace(/[([{]+$/, "")
+        .trimEnd()}...`;
 }
 
 function anchorFor(value) {
