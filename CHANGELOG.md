@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.3.1...v0.4.0) (2026-09-18)
+
+### Features
+
+- add optional Jev moderation triage and usage telemetry ([#18](https://github.com/bitsocialnet/ai-moderation-challenge/issues/18)) ([cd5a084](https://github.com/bitsocialnet/ai-moderation-challenge/commit/cd5a084ce949d7f1fa2990c831b74f2efed3dd64))
+
+### Bug Fixes
+
+- point the AI moderation link at bitsocial.net/projects ([09261e5](https://github.com/bitsocialnet/ai-moderation-challenge/commit/09261e58ee19702c9c5c8c8d7c28a8f8ce836086))
+
 ## [0.3.1](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.3.0...v0.3.1) (2026-09-05)
 
 ### Bug Fixes
