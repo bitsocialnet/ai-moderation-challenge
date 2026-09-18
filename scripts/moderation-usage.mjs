@@ -10,6 +10,14 @@ const count = (value) => Number.isSafeInteger(value) && value >= 0;
 const rate = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 const identifier = (value) => (typeof value === "string" && /^[A-Za-z0-9._:/-]{1,128}$/.test(value) ? value : "unknown");
 const stages = new Set(["jev", "triage", "reviewer"]);
+const actions = new Set(["approved", "queued_for_review", "moderation_error"]);
+const validProvider = (value) =>
+    record(value) &&
+    typeof value.apiHost === "string" &&
+    value.apiHost.length > 0 &&
+    typeof value.model === "string" &&
+    value.model.length > 0 &&
+    (value.stage === undefined || stages.has(value.stage));
 const tokenFields = ["inputTokens", "outputTokens", "cachedInputTokens", "cacheWriteInputTokens", "reasoningTokens"];
 
 export function validateRates(value) {
@@ -87,7 +95,16 @@ export function createUsageReport(rates) {
     };
     const providers = new Map();
     const add = (entry) => {
-        if (!record(entry) || entry.version !== 1 || (!["provider", "cache", "rule"].includes(entry.source) && entry.mode !== "shadow")) {
+        if (
+            !record(entry) ||
+            entry.version !== 1 ||
+            (Object.hasOwn(entry, "attempts") && !Array.isArray(entry.attempts)) ||
+            (entry.mode === "shadow"
+                ? !Array.isArray(entry.attempts)
+                : !["provider", "cache", "rule"].includes(entry.source) ||
+                  !actions.has(entry.action) ||
+                  (entry.source === "provider" && !validProvider(entry.provider)))
+        ) {
             report.ignoredLines++;
             return;
         }
