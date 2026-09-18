@@ -9,6 +9,8 @@ import type {
     ChallengeResultInput,
     GetChallengeArgs
 } from "@pkcprotocol/pkc-js/dist/node/community/types.js";
+import { createJevRequestBody, parseJevResponse } from "./jev.js";
+import { getProviderUsage, type ProviderUsage } from "./provider-usage.js";
 import Logger from "@pkcprotocol/pkc-logger";
 import {
     DEFAULT_CACHE_PATH,
@@ -16,6 +18,8 @@ import {
     DEFAULT_API_URL,
     DEFAULT_ERROR,
     DEFAULT_MODEL,
+    DEFAULT_JEV_API_URL,
+    DEFAULT_JEV_MODEL,
     ModelVerdictSchema,
     createOptionsSchema,
     type ApiFormat,
@@ -43,6 +47,7 @@ const DUPLICATE_MEDIA_ERROR = "This media was already posted recently.";
 const PROMPT_URL_CACHE_TTL_MS = 5 * 60 * 1000;
 const PROMPT_URL_FETCH_TIMEOUT_MS = 5_000;
 const TRIAGE_REQUEST_TIMEOUT_MS = 30_000;
+const JEV_REQUEST_TIMEOUT_MS = 2_000;
 // Reasoning reviewers can need more time than the fast first-pass gate to return a verdict.
 const REVIEWER_REQUEST_TIMEOUT_MS = 90_000;
 const MAX_PROMPT_URL_BYTES = 64 * 1024;
@@ -217,6 +222,35 @@ const optionInputs = [
         default: "",
         description: "Optional reasoning effort for the triage model",
         placeholder: "none"
+    },
+    {
+        option: "jevMode",
+        label: "Jev mode",
+        default: "off",
+        description: "off, shadow comparison, or confidence-gated triage before the existing cascade",
+        placeholder: "shadow"
+    },
+    {
+        option: "jevApiUrl",
+        label: "Jev API URL",
+        default: DEFAULT_JEV_API_URL,
+        description: "HTTPS TypeSafe evaluation endpoint",
+        placeholder: DEFAULT_JEV_API_URL
+    },
+    { option: "jevApiKey", label: "Jev API key", default: "", description: "Private TypeSafe API key", placeholder: "" },
+    {
+        option: "jevModel",
+        label: "Jev model",
+        default: DEFAULT_JEV_MODEL,
+        description: "Pinned TypeSafe model for bounded decisions",
+        placeholder: DEFAULT_JEV_MODEL
+    },
+    {
+        option: "jevMaxReviewProbability",
+        label: "Jev approval threshold",
+        default: "0.05",
+        description: "Maximum review probability for a Jev allow to bypass the existing cascade; experimental, not an accuracy guarantee",
+        placeholder: "0.05"
     },
     {
         option: "branch",
@@ -422,17 +456,41 @@ const duplicateMediaReservations = new Map<string, DuplicateMediaReservation>();
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 
-type ProviderStage = "triage" | "reviewer";
+type ProviderStage = "jev" | "triage" | "reviewer";
+
+type ProviderAttempt = {
+    stage: ProviderStage;
+    apiHost: string;
+    apiFormat: ApiFormat | "typesafe";
+    requestedModel: string;
+    model?: string;
+    startedAt: string;
+    elapsedMs: number;
+    status: "ok" | "error";
+    httpStatus?: number;
+    errorKind?: "http" | "timeout" | "invalid-response" | "network";
+    usage?: ProviderUsage;
+    verdict?: "allow" | "review";
+    jevDecision?: { reviewProbability: number; confidence: number; maxReviewProbability: number; wouldAutoAllow: boolean };
+};
 
 type ProviderConfig = {
     stage: ProviderStage;
     apiUrl: string;
-    apiFormat: ApiFormat;
+    apiFormat: ApiFormat | "typesafe";
     apiKey?: string;
     model: string;
     fallbackModel?: string;
     reasoningEffort?: ReasoningEffort;
 };
+
+const getJevProvider = (options: ParsedOptions): ProviderConfig => ({
+    stage: "jev",
+    apiUrl: options.jevApiUrl,
+    apiFormat: "typesafe",
+    apiKey: options.jevApiKey,
+    model: options.jevModel
+});
 
 const getReviewerProvider = (options: ParsedOptions): ProviderConfig => ({
     stage: "reviewer",
@@ -532,7 +590,9 @@ const parseJsonCacheFile = (value: unknown): JsonCacheFile => {
             cachedAt: entry.cachedAt,
             verdict: verdict.data,
             ...(typeof entry.providerModel === "string" ? { providerModel: entry.providerModel } : {}),
-            ...(entry.providerStage === "triage" || entry.providerStage === "reviewer" ? { providerStage: entry.providerStage } : {})
+            ...(entry.providerStage === "jev" || entry.providerStage === "triage" || entry.providerStage === "reviewer"
+                ? { providerStage: entry.providerStage }
+                : {})
         };
         return acc;
     }, {});
@@ -762,7 +822,8 @@ const createAuditEntry = ({
     verdict,
     error,
     providerModel,
-    providerStage = "reviewer"
+    providerStage = "reviewer",
+    attempts
 }: {
     source: "provider" | "cache";
     cacheKey: string;
@@ -774,9 +835,14 @@ const createAuditEntry = ({
     error?: unknown;
     providerModel?: string;
     providerStage?: ProviderStage;
+    attempts?: ProviderAttempt[];
 }) => {
     const provider =
-        providerStage === "triage" ? (getTriageProvider(options) ?? getReviewerProvider(options)) : getReviewerProvider(options);
+        providerStage === "jev"
+            ? getJevProvider(options)
+            : providerStage === "triage"
+              ? (getTriageProvider(options) ?? getReviewerProvider(options))
+              : getReviewerProvider(options);
     const resolvedProviderModel = providerModel ?? provider.model;
     return {
         version: 1,
@@ -829,6 +895,7 @@ const createAuditEntry = ({
             challengeRequestIdHash: target.challengeRequestIdHash
         },
         ...(verdict ? { verdict } : {}),
+        ...(attempts ? { attempts } : {}),
         ...(error
             ? {
                   error: error instanceof Error ? error.message : "Unknown AI moderation error"
@@ -1658,7 +1725,7 @@ class AiModerationApiError extends Error {
     }
 }
 
-const postJson = async ({ provider, body }: { provider: ProviderConfig; body: unknown }) => {
+const postJson = async ({ provider, body, attempt }: { provider: ProviderConfig; body: unknown; attempt?: ProviderAttempt }) => {
     if (provider.apiKey && new URL(provider.apiUrl).protocol !== "https:") {
         throw new Error("AI moderation API URL must use https when an API key is configured");
     }
@@ -1666,7 +1733,12 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
     log.trace(`POST ${provider.apiUrl} request sent`);
     // Self-hosted endpoints can run without a key; only send authorization when one is configured.
     const abortController = new AbortController();
-    const timeoutMs = provider.stage === "triage" ? TRIAGE_REQUEST_TIMEOUT_MS : REVIEWER_REQUEST_TIMEOUT_MS;
+    const timeoutMs =
+        provider.stage === "jev"
+            ? JEV_REQUEST_TIMEOUT_MS
+            : provider.stage === "triage"
+              ? TRIAGE_REQUEST_TIMEOUT_MS
+              : REVIEWER_REQUEST_TIMEOUT_MS;
     const timeoutError = new Error(`AI moderation ${provider.stage} request timed out after ${timeoutMs / 1000} seconds`);
     const timeout = setTimeout(() => abortController.abort(timeoutError), timeoutMs);
     timeout.unref?.();
@@ -1683,6 +1755,7 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
             body: JSON.stringify(body),
             signal: abortController.signal
         });
+        if (attempt) attempt.httpStatus = response.status;
         responseText = await response.text();
     } catch (error) {
         // Some fetch implementations replace the abort reason while consuming the response body.
@@ -1694,8 +1767,8 @@ const postJson = async ({ provider, body }: { provider: ProviderConfig; body: un
     log.trace(`POST ${provider.apiUrl} response status: ${response.status}`);
 
     if (!response.ok) {
-        const details = responseText ? `: ${responseText}` : "";
-        throw new AiModerationApiError(response.status, `AI moderation API error (${response.status})${details}`);
+        // Provider bodies can echo private inputs or credentials; keep only the status.
+        throw new AiModerationApiError(response.status, `AI moderation API error (${response.status})`);
     }
 
     try {
@@ -1878,31 +1951,115 @@ const withoutDuplicateCheck = (communityContext: CommunityContext): CommunityCon
     return ruleOnlyCommunityContext;
 };
 
+const measureProviderRequest = async <T extends { verdict: "allow" | "review" }>({
+    provider,
+    model = provider.model,
+    body,
+    attempts,
+    parse
+}: {
+    provider: ProviderConfig;
+    model?: string;
+    body: unknown;
+    attempts: ProviderAttempt[];
+    parse: (data: unknown) => T;
+}): Promise<T> => {
+    const attempt: ProviderAttempt = {
+        stage: provider.stage,
+        apiHost: new URL(provider.apiUrl).hostname,
+        apiFormat: provider.apiFormat,
+        requestedModel: model,
+        startedAt: new Date().toISOString(),
+        elapsedMs: 0,
+        status: "error"
+    };
+    attempts.push(attempt);
+    const started = performance.now();
+    let received = false;
+    try {
+        const data = await postJson({ provider, body, attempt });
+        received = true;
+        attempt.usage = getProviderUsage(data);
+        if (isRecord(data) && typeof data.model === "string" && /^[a-zA-Z0-9._:/-]{1,128}$/.test(data.model)) attempt.model = data.model;
+        const result = parse(data);
+        attempt.status = "ok";
+        attempt.verdict = result.verdict;
+        return result;
+    } catch (error) {
+        attempt.errorKind =
+            error instanceof AiModerationApiError
+                ? "http"
+                : error instanceof Error && error.message.includes("timed out")
+                  ? "timeout"
+                  : received || (attempt.httpStatus !== undefined && attempt.httpStatus >= 200 && attempt.httpStatus < 300)
+                    ? "invalid-response"
+                    : "network";
+        throw error;
+    } finally {
+        attempt.elapsedMs = Math.round(performance.now() - started);
+    }
+};
+
 const requestProviderVerdict = async ({
     provider,
     model = provider.model,
     systemPrompt,
     communityContext,
-    target
+    target,
+    attempts
 }: {
     provider: ProviderConfig;
     model?: string;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
+    attempts: ProviderAttempt[];
 }) =>
-    parseModelResponse(
-        await postJson({
-            provider,
-            body: createModelRequestBody({
-                provider,
-                model,
-                systemPrompt,
-                communityContext,
-                target
-            })
-        })
-    );
+    measureProviderRequest({
+        provider,
+        model,
+        attempts,
+        body: createModelRequestBody({ provider, model, systemPrompt, communityContext, target }),
+        parse: parseModelResponse
+    });
+
+const requestJevDecision = async ({
+    options,
+    systemPrompt,
+    communityContext,
+    target,
+    attempts
+}: {
+    options: ParsedOptions;
+    systemPrompt: string;
+    communityContext: CommunityContext;
+    target: ModelPublicationTarget;
+    attempts: ProviderAttempt[];
+}) => {
+    const index = attempts.length;
+    const decision = await measureProviderRequest({
+        provider: getJevProvider(options),
+        attempts,
+        body: createJevRequestBody({ model: options.jevModel, systemPrompt, payload: createUserPromptPayload(communityContext, target) }),
+        parse: (data) => {
+            const parsed = parseJevResponse(data);
+            if (parsed.model !== options.jevModel && !["jev-latest", "jev-preview"].includes(options.jevModel)) {
+                throw new Error("Unexpected Jev response model");
+            }
+            return parsed;
+        }
+    });
+    attempts[index]!.jevDecision = {
+        reviewProbability: decision.reviewProbability,
+        confidence: decision.confidence,
+        maxReviewProbability: options.jevMaxReviewProbability,
+        wouldAutoAllow: isJevApproval(decision, options)
+    };
+    return decision;
+};
+
+const isJevApproval = (decision: ReturnType<typeof parseJevResponse>, options: ParsedOptions) =>
+    decision.verdict === "allow" && decision.reviewProbability <= options.jevMaxReviewProbability;
 
 type ProviderVerdict = {
     verdict: ModelVerdict;
@@ -1924,16 +2081,18 @@ const requestProviderVerdictWithFallback = async ({
     provider,
     systemPrompt,
     communityContext,
-    target
+    target,
+    attempts
 }: {
     provider: ProviderConfig;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
+    attempts: ProviderAttempt[];
 }): Promise<ProviderVerdict> => {
     try {
         return {
-            verdict: await requestProviderVerdict({ provider, systemPrompt, communityContext, target }),
+            verdict: await requestProviderVerdict({ provider, systemPrompt, communityContext, target, attempts }),
             model: provider.model,
             stage: provider.stage
         };
@@ -1956,7 +2115,8 @@ const requestProviderVerdictWithFallback = async ({
                     model: fallbackModel,
                     systemPrompt,
                     communityContext,
-                    target
+                    target,
+                    attempts
                 }),
                 model: fallbackModel,
                 stage: provider.stage
@@ -1971,13 +2131,23 @@ const requestCascadedVerdict = async ({
     options,
     systemPrompt,
     communityContext,
-    target
+    target,
+    attempts
 }: {
     options: ParsedOptions;
     systemPrompt: string;
     communityContext: CommunityContext;
     target: ModelPublicationTarget;
+    attempts: ProviderAttempt[];
 }): Promise<ProviderVerdict> => {
+    if (options.jevMode === "triage") {
+        try {
+            const decision = await requestJevDecision({ options, systemPrompt, communityContext, target, attempts });
+            if (isJevApproval(decision, options)) return { verdict: { verdict: "allow" }, model: decision.model, stage: "jev" };
+        } catch {
+            log.trace("Jev unavailable or invalid; continuing the existing moderation cascade");
+        }
+    }
     const triageProvider = getTriageProvider(options);
     if (triageProvider) {
         try {
@@ -1985,7 +2155,8 @@ const requestCascadedVerdict = async ({
                 provider: triageProvider,
                 systemPrompt,
                 communityContext,
-                target
+                target,
+                attempts
             });
             if (triageResult.verdict.verdict === "allow") return triageResult;
             log.trace("AI moderation triage model %s requested reviewer escalation", triageProvider.model);
@@ -1998,7 +2169,8 @@ const requestCascadedVerdict = async ({
         provider: getReviewerProvider(options),
         systemPrompt,
         communityContext,
-        target
+        target,
+        attempts
     });
 };
 
@@ -2030,6 +2202,15 @@ const evaluate = async ({
                       reasoningEffort: options.triageReasoningEffort
                   }
                 : undefined,
+            jev:
+                options.jevMode === "off"
+                    ? undefined
+                    : {
+                          mode: options.jevMode,
+                          apiUrl: options.jevApiUrl,
+                          model: options.jevModel,
+                          maxReviewProbability: options.jevMaxReviewProbability
+                      },
             promptHash,
             target: modelTarget,
             communityContext
@@ -2061,11 +2242,21 @@ const evaluate = async ({
         return cachedEntry.verdict;
     }
 
+    const attempts: ProviderAttempt[] = [];
+    const shadowAttempts: ProviderAttempt[] = [];
+    const shadow =
+        options.jevMode === "shadow"
+            ? requestJevDecision({ options, systemPrompt, communityContext, target: modelTarget, attempts: shadowAttempts }).then(
+                  (decision) => ({ decision }),
+                  () => ({ decision: undefined })
+              )
+            : undefined;
     const promise = requestCascadedVerdict({
         options,
         systemPrompt,
         communityContext,
-        target: modelTarget
+        target: modelTarget,
+        attempts
     })
         .then(async (providerResult) => {
             let finalRawVerdict = providerResult.verdict;
@@ -2077,7 +2268,8 @@ const evaluate = async ({
                     provider: getReviewerProvider(options),
                     systemPrompt: getSystemPrompt(baseSystemPrompt, ruleOnlyCommunityContext, target),
                     communityContext: ruleOnlyCommunityContext,
-                    target: modelTarget
+                    target: modelTarget,
+                    attempts
                 });
                 finalRawVerdict = retryResult.verdict;
                 providerModel = retryResult.model;
@@ -2107,7 +2299,8 @@ const evaluate = async ({
                     target,
                     verdict: finalRawVerdict,
                     providerModel,
-                    providerStage
+                    providerStage,
+                    attempts
                 })
             });
             return verdict;
@@ -2122,11 +2315,42 @@ const evaluate = async ({
                     promptHash,
                     communityContext,
                     target,
-                    error
+                    error,
+                    attempts
                 })
             });
             throw error;
         });
+
+    if (shadow) {
+        // Never put advisory verdicts in the public mod-log publisher's input or await them on the posting path.
+        void Promise.all([
+            shadow,
+            promise.then(
+                (verdict) => ({ verdict: verdict.verdict }),
+                () => ({ verdict: undefined })
+            )
+        ])
+            .then(([observation, actual]) =>
+                writeAuditLogEntry({
+                    auditLogPath: options.auditLogPath ? `${options.auditLogPath}.jev-shadow.jsonl` : undefined,
+                    entry: {
+                        version: 1,
+                        loggedAt: new Date().toISOString(),
+                        cacheKey,
+                        promptHash,
+                        mode: "shadow",
+                        baselineStatus: actual.verdict ? "ok" : "error",
+                        baselineVerdict: actual.verdict,
+                        decision: observation.decision,
+                        wouldAutoAllow: observation.decision ? isJevApproval(observation.decision, options) : false,
+                        maxReviewProbability: options.jevMaxReviewProbability,
+                        attempts: shadowAttempts
+                    }
+                })
+            )
+            .catch(() => log.error("Jev shadow audit failed"));
+    }
 
     promise.catch(() => {
         const timeout = setTimeout(() => {
@@ -2191,9 +2415,9 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
     }
 };
 
-// Publishing either of these in community.challenges[i].publicOptions hands out a credential; every other option is
+// Publishing these in community.challenges[i].publicOptions hands out a credential; every other option is
 // private by default but legitimately publishable, so the owner decides.
-const NON_PUBLISHABLE_OPTIONS: ReadonlySet<string> = new Set(["apiKey", "triageApiKey", "promptBearerToken"]);
+const NON_PUBLISHABLE_OPTIONS: ReadonlySet<string> = new Set(["apiKey", "triageApiKey", "jevApiKey", "promptBearerToken"]);
 
 // Runs on every community edit and start. Must stay sync and network-free: reject here only what the options
 // schema and static config relationships can prove, and leave provider reachability to getChallenge.

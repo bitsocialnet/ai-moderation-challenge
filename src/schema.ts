@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const DEFAULT_API_URL = "https://api.openai.com/v1/responses";
+export const DEFAULT_JEV_API_URL = "https://api.typesafe.ai/v1/systemone";
+export const DEFAULT_JEV_MODEL = "jev-1.13.0";
 export const DEFAULT_MODEL = "gpt-5.4-nano";
 export const DEFAULT_CACHE_PATH = "~/.bitsocial-ai-moderation-cache.json";
 export const DEFAULT_AUDIT_LOG_PATH = "~/.bitsocial-ai-moderation-audit.jsonl";
@@ -35,6 +37,11 @@ export type ParsedOptions = {
     triageApiKey?: string;
     triageModel?: string;
     triageReasoningEffort?: ReasoningEffort;
+    jevMode: "off" | "shadow" | "triage";
+    jevApiUrl: string;
+    jevApiKey?: string;
+    jevModel: string;
+    jevMaxReviewProbability: number;
     branch: Branch;
     prompt?: string;
     promptPath?: string;
@@ -162,6 +169,17 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                     (value) => resolveOptionalOptionString(value, "triageReasoningEffort"),
                     ReasoningEffortSchema.optional()
                 ),
+                jevMode: z.preprocess((value) => resolveOptionString(value, "jevMode"), z.enum(["off", "shadow", "triage"])),
+                jevApiUrl: z.preprocess(
+                    (value) => resolveOptionString(value, "jevApiUrl"),
+                    z.url().refine(isHttpsUrl, { message: "Jev API URL must use https" })
+                ),
+                jevApiKey: z.preprocess((value) => resolveOptionalOptionString(value, "jevApiKey"), z.string().optional()),
+                jevModel: z.preprocess((value) => resolveOptionString(value, "jevModel"), z.string().min(1)),
+                jevMaxReviewProbability: z.preprocess((value) => {
+                    const resolved = resolveOptionString(value, "jevMaxReviewProbability");
+                    return typeof resolved === "string" ? Number(resolved) : resolved;
+                }, z.number().finite().min(0).lt(0.5)),
                 branch: z.preprocess((value) => {
                     const resolved = resolveOptionString(value, "branch");
                     return typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved;
@@ -193,6 +211,12 @@ export const createOptionsSchema = (optionInputs: ReadonlyArray<OptionInput>) =>
                 error: z.preprocess((value) => resolveOptionString(value, "error"), z.string())
             })
             .superRefine((options, context) => {
+                if (options.jevMode !== "off" && !options.jevApiKey) {
+                    context.addIssue({ code: "custom", path: ["jevApiKey"], message: "Jev API key is required when Jev is enabled" });
+                }
+                if (options.jevMode === "shadow" && !options.auditLogPath) {
+                    context.addIssue({ code: "custom", path: ["auditLogPath"], message: "Shadow mode requires an audit log path" });
+                }
                 if (options.apiKey && !isHttpsUrl(options.apiUrl)) {
                     context.addIssue({
                         code: "custom",
