@@ -1,0 +1,20 @@
+{
+    "id": "jev-cascade",
+    "apiKeyEnv": "GROK_API_KEY",
+    "triageApiKeyEnv": "LUNA_API_KEY",
+    "jevApiKeyEnv": "JEV_API_KEY",
+    "options": {
+        "apiUrl": "https://api.x.ai/v1/chat/completions",
+        "apiFormat": "chat-completions",
+        "model": "grok-4.6",
+        "reasoningEffort": "high",
+        "triageApiUrl": "https://api.openai.com/v1/responses",
+        "triageApiFormat": "responses",
+        "triageModel": "gpt-5.6-luna",
+        "triageReasoningEffort": "none",
+        "jevMode": "triage",
+        "jevApiUrl": "https://api.typesafe.ai/v1/systemone",
+        "jevModel": "jev-1.13.0",
+        "jevMaxReviewProbability": "0.05"
+    }
+}

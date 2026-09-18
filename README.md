@@ -86,6 +86,7 @@ Production operators should keep the real moderation prompt in a private node-lo
 | `promptBearerToken`       | none                                     | Private bearer token sent only when fetching `promptUrl`                                                       |
 | `cachePath`               | `~/.bitsocial-ai-moderation-cache.json`  | Private JSON verdict cache path; set to an empty string to disable persistent caching                          |
 | `auditLogPath`            | `~/.bitsocial-ai-moderation-audit.jsonl` | Private JSONL verdict audit log path; set to an empty string to disable audit logging                          |
+| `articleMaxAgeHours`      | disabled                                 | Optional deterministic age limit for top-level non-media links; uses URL-path day hints and submission time    |
 | `rejectDuplicateMedia`    | `false`                                  | Reject top-level posts that reuse an image, video, or audio URL from a non-archived post in the same community |
 | `error`                   | `Rejected by Bitsocial AI moderation.`   | Error shown when content edits are rejected or moderation is unavailable for an edit                           |
 
@@ -180,6 +181,22 @@ Every option is private by default. An owner can publish specific options by nam
 - Two branch invocations for the same publication reuse one in-process verdict promise.
 - Successful verdicts are cached in a private JSON file keyed by a SHA-256 hash over primary, triage, and enabled Jev model/provider config, community context including duplicate-check context, target content, and the final prompt hash. The cache does not store the raw prompt or API keys.
 - Verdicts are written to a private JSONL audit log with the model stage, model reason, raw publication fields, and hashes/metadata for correlation. The audit log does not store the raw prompt, API keys, prompt URL, or prompt bearer token.
+
+## Article age checks
+
+Set `articleMaxAgeHours: "48"` on **both** branches only for communities whose intended policy is a 48-hour article-link window. This is an independent explicit operator setting: the package never extracts numbers from arbitrary rules or prompts. Empty or omitted leaves deterministic enforcement disabled.
+
+For top-level links, excluding known image/video/audio links, the node computes minimum and maximum possible article age from the existing URL-path date hint and submission timestamp. The existing hint convention spans the full UTC calendar day; a URL date is not a verified publication time. Review occurs only when **even the latest possible article time is strictly older** than the configured window. An exact boundary, a day straddling the boundary, a future day, a missing/invalid date, or missing submission time cannot establish an age violation. The model receives computed age bounds and is instructed to keep checking other rules without independently re-enforcing the configured window. Replies and content edits retain their existing behavior; edits do not contain the original linked-article context.
+
+A proven age violation uses the existing allow/review branch semantics and does not call any provider. Its audit entry has `source: "rule"`, `rule: "article-recency"`, numeric bounds, and no provider or token usage. It uses the existing in-process deduplication; deterministic age verdicts are not written to the persistent model cache. Applicable age configuration participates in the verdict cache identity. The setting does not fetch articles or prove that an untrusted URL date is truthful; enable it only where that date convention is suitable.
+
+## Local usage reporting and evaluation
+
+Run `node scripts/moderation-usage.mjs --audit /private/moderation-audit.jsonl` to generate an offline aggregate report. It counts final provider stages, stages reached, audited disk-cache hits, deterministic decisions, request latency, throttling, timeouts, and reported tokens. It excludes publication text, prompts, reasons, credentials, and unknown audit fields. In-process cache reuse is not logged and cannot be counted from these files. Shadow logs can be reported separately; do not concatenate overlapping log copies.
+
+For cost estimates, pass `--rates /private/rates.json`. Rates are explicitly supplied per exact host/model; no prices are embedded or assumed current. Missing rates, usage, cache breakdowns, or separately billed reasoning counts leave total cost unknown. Known cost remains a subtotal. Provider-attempt latency is not end-to-end moderation latency, and the report cannot reconstruct unreported billing. See [operator tooling](docs/moderation-tooling.md) for the rate format and examples.
+
+`node scripts/moderation-evaluate.mjs` validates the committed synthetic corpus **offline**. Saved predictions can be compared without network access. Deliberate live evaluation uses the built challenge, explicit credential environment references, and request/byte budgets; it prints only sanitized case IDs, labels, and aggregate telemetry. See [evaluation instructions](docs/moderation-tooling.md#moderation-evaluation). Synthetic cases and independently reviewed real cases are labeled separately; the initial corpus is not evidence of real-world model accuracy.
 
 ## Moderation Audit Community
 
