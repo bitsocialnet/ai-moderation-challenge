@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.1](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.5.0...v0.5.1) (2026-09-18)
+
+### Bug Fixes
+
+- **moderation:** preserve stricter article rules and validate usage records ([#20](https://github.com/bitsocialnet/ai-moderation-challenge/issues/20)) ([6f167a0](https://github.com/bitsocialnet/ai-moderation-challenge/commit/6f167a036d2f4f0d5335ce7b0fcb758827fa5059))
+
 ## [0.5.0](https://github.com/bitsocialnet/ai-moderation-challenge/compare/v0.4.0...v0.5.0) (2026-09-18)
 
 ### Features
