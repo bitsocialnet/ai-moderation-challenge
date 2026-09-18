@@ -98,6 +98,7 @@ export function createUsageReport(rates) {
         if (
             !record(entry) ||
             entry.version !== 1 ||
+            (Object.hasOwn(entry, "attempts") && !Array.isArray(entry.attempts)) ||
             (entry.mode === "shadow"
                 ? !Array.isArray(entry.attempts)
                 : !["provider", "cache", "rule"].includes(entry.source) ||

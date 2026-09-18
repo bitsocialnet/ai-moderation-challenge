@@ -2246,6 +2246,7 @@ const evaluate = async ({
                           maxReviewProbability: options.jevMaxReviewProbability
                       },
             promptHash,
+            userInstructionsHash: sha256(getUserPromptInstructions(modelTarget)),
             target: modelTarget,
             communityContext
         })

@@ -99,6 +99,7 @@ describe("offline moderation usage report", () => {
             { version: 1, source: "provider", action: "approved" },
             { version: 1, source: "provider", action: "approved", provider: { stage: "triage" } },
             { version: 1, source: "provider", action: "bogus", provider },
+            ...[null, {}, "not-an-array"].map((attempts) => ({ version: 1, source: "provider", action: "approved", provider, attempts })),
             { version: 1, source: "cache" },
             { version: 1, mode: "shadow" }
         ])
@@ -111,7 +112,7 @@ describe("offline moderation usage report", () => {
             provider: { apiHost: "legacy.example", model: "legacy" }
         });
         expect(report.finish()).toMatchObject({
-            ignoredLines: 6,
+            ignoredLines: 9,
             auditEntries: 2,
             providerDecisions: 2,
             legacyEntriesWithoutAttempts: 2,
