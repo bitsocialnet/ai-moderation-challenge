@@ -30,6 +30,9 @@ jobs:
 
             - run: corepack yarn test
 
+            - name: Verify optional Jev helpers without provider calls
+              run: node --test scripts/jev/tests/*.test.mjs
+
             - run: corepack yarn test:coverage
 
             - name: Write coverage badge payload

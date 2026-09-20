@@ -1,0 +1,62 @@
+[
+    {
+        "id": "ordinary-question",
+        "group": "ordinary-question",
+        "split": "fit"
+    },
+    {
+        "id": "clear-commercial-spam",
+        "group": "clear-commercial-spam",
+        "split": "fit"
+    },
+    {
+        "id": "quoted-abuse-discussion",
+        "group": "quoted-abuse-discussion",
+        "split": "fit"
+    },
+    {
+        "id": "prompt-injection",
+        "group": "prompt-injection",
+        "split": "fit"
+    },
+    {
+        "id": "short-reply",
+        "group": "short-reply",
+        "split": "fit"
+    },
+    {
+        "id": "clear-topic-violation",
+        "group": "clear-topic-violation",
+        "split": "fit"
+    },
+    {
+        "id": "recency-recent",
+        "group": "recency-variants",
+        "split": "holdout"
+    },
+    {
+        "id": "recency-boundary",
+        "group": "recency-variants",
+        "split": "holdout"
+    },
+    {
+        "id": "recency-expired",
+        "group": "recency-variants",
+        "split": "holdout"
+    },
+    {
+        "id": "recency-future",
+        "group": "recency-variants",
+        "split": "holdout"
+    },
+    {
+        "id": "recency-missing",
+        "group": "recency-variants",
+        "split": "holdout"
+    },
+    {
+        "id": "recency-invalid",
+        "group": "recency-variants",
+        "split": "holdout"
+    }
+]

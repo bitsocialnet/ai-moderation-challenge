@@ -246,4 +246,61 @@ describe("repeatable moderation evaluation", () => {
         expect(globalThis.fetch).toBe(original);
         await expect(readFile(path!)).rejects.toThrow();
     });
+    it("exports sanitized Jev observations and charges memory-cache reuse only once", async () => {
+        let calls = 0;
+        const result = await liveEvaluation(
+            { ...corpus, cases: [0, 1].map((i) => ({ ...corpus.cases[0], id: `case-${i}` })) },
+            { id: "jev-test", options: { jevModel: "jev-1.13.0" } },
+            {
+                maxRequests: 2,
+                maxRequestBytes: 100,
+                rates,
+                factory: () => ({
+                    getChallenge: async ({ challengeSettings }) => {
+                        if (calls++ === 0)
+                            await writeFile(
+                                challengeSettings.options.auditLogPath,
+                                JSON.stringify({
+                                    version: 1,
+                                    source: "provider",
+                                    action: "approved",
+                                    provider: { ...provider, stage: "jev" },
+                                    publication: "PRIVATE_PUBLICATION",
+                                    attempts: [
+                                        {
+                                            ...attempt,
+                                            stage: "jev",
+                                            rawError: "PRIVATE_ERROR",
+                                            jevDecision: {
+                                                reviewProbability: 0.01,
+                                                confidence: 0.98,
+                                                maxReviewProbability: 0.05,
+                                                wouldAutoAllow: true
+                                            }
+                                        }
+                                    ]
+                                }) + "\n"
+                            );
+                        return { success: true };
+                    }
+                })
+            }
+        );
+        expect(result.predictions[0]).toMatchObject({
+            verdict: "allow",
+            escalated: false,
+            memoryCacheHit: false,
+            jev: { reviewProbability: 0.01, wouldAutoAllow: true }
+        });
+        expect(result.predictions[0].estimatedCostUsd).toBeCloseTo(0.00142);
+        expect(result.predictions[1]).toMatchObject({
+            verdict: "allow",
+            memoryCacheHit: true,
+            estimatedCostUsd: 0,
+            jev: result.predictions[0].jev
+        });
+        expect(result.comparison.metricsByProvenance.synthetic.costUsd.total).toBeCloseTo(0.00142);
+        expect(result.usage.providers[0].requests).toBe(1);
+        expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    });
 });

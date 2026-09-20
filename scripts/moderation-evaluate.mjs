@@ -4,11 +4,74 @@ import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { createUsageReport } from "./moderation-usage.mjs";
+import { createUsageReport, estimateCost } from "./moderation-usage.mjs";
 
 const object = (value) => value && typeof value === "object" && !Array.isArray(value);
 const label = (value) => typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value);
 const verdicts = ["allow", "review"];
+export const sha256 = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const nonnegative = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const probability = (value) => nonnegative(value) && value <= 1;
+export function validateObservation(item) {
+    if (!object(item) || !label(item.id) || ![...verdicts, "error"].includes(item.verdict)) throw new Error("Invalid observation");
+    for (const key of ["elapsedMs", "estimatedCostUsd"])
+        if (item[key] !== undefined && item[key] !== null && !nonnegative(item[key])) throw new Error("Invalid observation metric");
+    if (item.escalated !== undefined && item.escalated !== null && typeof item.escalated !== "boolean")
+        throw new Error("Invalid escalation metric");
+    if (
+        item.jev !== undefined &&
+        item.jev !== null &&
+        (!object(item.jev) ||
+            !probability(item.jev.reviewProbability) ||
+            !probability(item.jev.confidence) ||
+            !probability(item.jev.maxReviewProbability) ||
+            typeof item.jev.wouldAutoAllow !== "boolean" ||
+            (item.jev.wouldAutoAllow && item.jev.reviewProbability > item.jev.maxReviewProbability))
+    )
+        throw new Error("Invalid Jev evidence");
+    return item;
+}
+
+export function summarizePredictions(cases, predictions) {
+    const indexed = new Map(predictions.map((item) => [item.id, validateObservation(item)]));
+    const rows = cases.map((item) => ({ expected: item.expected, prediction: indexed.get(item.id) }));
+    const times = rows
+        .map((row) => row.prediction?.elapsedMs)
+        .filter(nonnegative)
+        .sort((a, b) => a - b);
+    const costs = rows.map((row) => row.prediction?.estimatedCostUsd);
+    const count = (test) => rows.filter(test).length;
+    const allows = count((row) => row.expected === "allow"),
+        reviews = rows.length - allows;
+    const falseAllows = count((row) => row.expected === "review" && row.prediction?.verdict === "allow");
+    const falseAlarms = count((row) => row.expected === "allow" && row.prediction?.verdict === "review");
+    const missing = count((row) => !row.prediction),
+        errors = count((row) => row.prediction?.verdict === "error");
+    return {
+        cases: rows.length,
+        expectedAllows: allows,
+        expectedReviews: reviews,
+        falseAllows,
+        falseAlarms,
+        falseAllowRate: reviews ? falseAllows / reviews : null,
+        falseAlarmRate: allows ? falseAlarms / allows : null,
+        missing,
+        errors,
+        abstentions: missing + errors,
+        escalations: count((row) => row.prediction?.escalated === true),
+        unknownEscalations: count((row) => typeof row.prediction?.escalated !== "boolean"),
+        latencyMs: {
+            measured: times.length,
+            p50: times.length ? times[Math.ceil(times.length * 0.5) - 1] : null,
+            p95: times.length ? times[Math.ceil(times.length * 0.95) - 1] : null
+        },
+        costUsd: {
+            knownSubtotal: costs.filter(nonnegative).reduce((sum, cost) => sum + cost, 0),
+            unknownCases: costs.filter((cost) => !nonnegative(cost)).length,
+            total: costs.length && costs.every(nonnegative) ? costs.reduce((sum, cost) => sum + cost, 0) : null
+        }
+    };
+}
 export function validateCorpus(corpus) {
     if (!object(corpus) || corpus.version !== 1 || !Array.isArray(corpus.cases) || !corpus.cases.length || corpus.cases.length > 1000)
         throw new Error("Invalid corpus");
@@ -71,6 +134,7 @@ export function comparePredictions(corpus, predictions) {
             !corpus.cases.some((item) => item.id === prediction.id)
         )
             throw new Error("Invalid or duplicate prediction");
+        validateObservation(prediction);
         indexed.set(prediction.id, prediction.verdict);
     }
     const rows = corpus.cases.map((item) => ({
@@ -87,7 +151,16 @@ export function comparePredictions(corpus, predictions) {
         falseReviews: rows.filter((item) => item.expected === "allow" && item.actual === "review").length,
         errors: rows.filter((item) => item.actual === "error").length,
         missing: rows.filter((item) => item.actual === "missing").length,
-        rows
+        rows,
+        metricsByProvenance: Object.fromEntries(
+            ["synthetic", "reviewed-real"].map((provenance) => [
+                provenance,
+                summarizePredictions(
+                    corpus.cases.filter((item) => item.provenance === provenance),
+                    predictions
+                )
+            ])
+        )
     };
 }
 export function validateProfile(profile, env = process.env) {
@@ -131,7 +204,7 @@ export function validateProfile(profile, env = process.env) {
 export async function liveEvaluation(
     corpus,
     profile,
-    { maxRequests, maxRequestBytes, factory, fetchImpl = globalThis.fetch, env = process.env }
+    { maxRequests, maxRequestBytes, factory, fetchImpl = globalThis.fetch, env = process.env, rates, runtimeSha256 = null }
 ) {
     validateCorpus(corpus);
     if (
@@ -149,7 +222,7 @@ export async function liveEvaluation(
     let requests = 0,
         requestBytes = 0,
         budgetExceeded = false;
-    const usage = createUsageReport();
+    const usage = createUsageReport(rates);
     const predictions = [];
     const observedOutcomes = new Map();
     try {
@@ -179,6 +252,7 @@ export async function liveEvaluation(
                 item.rules,
                 item.articleMaxAgeHours
             ]);
+            const started = performance.now();
             const result = await challenge.getChallenge({
                 challengeSettings: {
                     options: {
@@ -217,14 +291,43 @@ export async function liveEvaluation(
                 action === "moderation_error" || budgetExceeded
                     ? "error"
                     : !entries.length && observedOutcomes.has(inputKey)
-                      ? observedOutcomes.get(inputKey)
+                      ? observedOutcomes.get(inputKey).verdict
                       : result.success
                         ? "allow"
                         : entries.length
                           ? "review"
                           : "error";
-            observedOutcomes.set(inputKey, verdict);
-            predictions.push({ id: item.id, verdict });
+            const cached = !entries.length ? observedOutcomes.get(inputKey) : undefined;
+            const attempts = entries.filter((entry) => entry.source === "provider").flatMap((entry) => entry.attempts ?? []);
+            const decision = attempts.findLast(
+                (attempt) => attempt.stage === "jev" && attempt.status === "ok" && attempt.jevDecision
+            )?.jevDecision;
+            const costs = attempts.map((attempt) => estimateCost(attempt, rates));
+            const prediction = {
+                id: item.id,
+                verdict,
+                elapsedMs: performance.now() - started,
+                escalated:
+                    cached?.escalated ??
+                    (entries.length ? attempts.some((attempt) => attempt.stage === "triage" || attempt.stage === "reviewer") : null),
+                memoryCacheHit: Boolean(cached),
+                estimatedCostUsd:
+                    cached || entries.at(-1)?.source === "rule"
+                        ? 0
+                        : attempts.length && costs.every(nonnegative)
+                          ? costs.reduce((sum, cost) => sum + cost, 0)
+                          : null,
+                jev: decision
+                    ? {
+                          reviewProbability: decision.reviewProbability,
+                          confidence: decision.confidence,
+                          maxReviewProbability: decision.maxReviewProbability,
+                          wouldAutoAllow: decision.wouldAutoAllow
+                      }
+                    : (cached?.jev ?? null)
+            };
+            observedOutcomes.set(inputKey, prediction);
+            predictions.push(prediction);
         }
     } finally {
         globalThis.fetch = originalFetch;
@@ -237,7 +340,11 @@ export async function liveEvaluation(
         budgetExceeded,
         requests,
         requestBytes,
-        corpusSha256: createHash("sha256").update(JSON.stringify(corpus)).digest("hex"),
+        corpusSha256: sha256(corpus),
+        profileSha256: sha256(profile.options),
+        jevModel: /^jev-\d+\.\d+\.\d+$/.test(options.jevModel ?? "") ? options.jevModel : null,
+        runtimeSha256,
+        predictions,
         comparison: comparePredictions(corpus, predictions),
         usage: usage.finish()
     };
@@ -246,7 +353,7 @@ export async function liveEvaluation(
 export async function evaluationMain(args) {
     if (args.includes("--help")) {
         console.log(
-            "node scripts/moderation-evaluate.mjs [--corpus evaluations/moderation-corpus.json] [--predictions predictions.json]\nLive (opt-in): --live --profile profile.json --max-requests N --max-request-bytes N\nDefault validates corpus offline. Live mode requires a fresh build and credential environment variables."
+            "node scripts/moderation-evaluate.mjs [--corpus evaluations/moderation-corpus.json] [--predictions predictions.json]\nLive (opt-in): --live --profile profile.json --max-requests N --max-request-bytes N [--rates rates.json]\nDefault validates corpus offline. Live mode requires a fresh build and credential environment variables."
         );
         return;
     }
@@ -255,11 +362,14 @@ export async function evaluationMain(args) {
         const flag = args[i];
         if (Object.hasOwn(flags, flag)) throw new Error("Duplicate flag");
         if (flag === "--live") flags[flag] = true;
-        else if (["--corpus", "--predictions", "--profile", "--max-requests", "--max-request-bytes"].includes(flag) && args[i + 1])
+        else if (
+            ["--corpus", "--predictions", "--profile", "--max-requests", "--max-request-bytes", "--rates"].includes(flag) &&
+            args[i + 1]
+        )
             flags[flag] = args[++i];
         else throw new Error("Unknown flag or missing value");
     }
-    if (!flags["--live"] && ["--profile", "--max-requests", "--max-request-bytes"].some((flag) => flags[flag]))
+    if (!flags["--live"] && ["--profile", "--max-requests", "--max-request-bytes", "--rates"].some((flag) => flags[flag]))
         throw new Error("Live settings require --live");
     if (flags["--live"] && flags["--predictions"]) throw new Error("Choose live or saved predictions");
     const corpus = validateCorpus(
@@ -273,7 +383,11 @@ export async function evaluationMain(args) {
         result = await liveEvaluation(corpus, profile, {
             maxRequests: Number(flags["--max-requests"]),
             maxRequestBytes: Number(flags["--max-request-bytes"]),
-            factory
+            factory,
+            rates: flags["--rates"] ? JSON.parse(await readFile(flags["--rates"], "utf8")) : undefined,
+            runtimeSha256: createHash("sha256")
+                .update(await readFile(new URL("../dist/index.js", import.meta.url)))
+                .digest("hex")
         });
     } else if (flags["--predictions"])
         result = {

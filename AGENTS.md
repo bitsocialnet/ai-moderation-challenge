@@ -179,3 +179,9 @@ Use these only when relevant to the active task:
 - Leave model and reasoning fields unset in skills and roles. Runtime invocation, app/user defaults, and parent inheritance select them. Do not pin a generation or model family in repository prompts.
 - Keep hook schemas and permissions native to each harness; similar file contents do not imply identical runtime behavior. See [skills-and-tools.md](docs/agent-playbooks/skills-and-tools.md).
 - Keep skill descriptions precise and roots short. Load references when relevant; preserve domain constraints and supported manual-invocation metadata. Prefer installed tools and current official documentation when versions matter; search for or install additional skills only when requested.
+
+## Optional Jev semantic review
+
+For an explicitly selected code or documentation diff, use `scripts/jev/review-README.md`. The bounded helper is opt-in, uses the private machine configuration only with `--live`, and produces advisory issues or uncertainty. Keep ordinary linting, tests, and independent review authoritative; do not add automatic edit, commit, or repair hooks. Offline checks run with `node --test scripts/jev/tests/*.test.mjs`.
+
+For investigation of recurring backend failures, `scripts/jev/triage-README.md` covers an opt-in experiment on explicitly sanitized event groups; keep deterministic alerts and original evidence. The helper requires explicit live invocation for provider calls and is not a service integration.
