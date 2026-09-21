@@ -136,3 +136,18 @@ The seeded random audit samples the full eligible pool first, then uncertainty s
 ## Recency regression evidence
 
 The previous runtime transmitted date strings and instructed the model to subtract them; it did not perform age arithmetic. The earlier synthetic evaluation found inconsistent decisions around a 48-hour window. The new regression also demonstrates that the former runtime accepted an expired article whenever a provider answered allow. With `articleMaxAgeHours` configured, that case now reviews without a provider request. Boundary/future/missing dates still reach the normal cascade to check other rules. The tests run without network or credentials; they verify runtime behavior, not model accuracy.
+
+## Blind human review handoff
+
+`prepareModerationReview` in `scripts/moderation-review.mjs` exports existing synthetic fixtures into a blind queue with opaque case IDs. It removes previous expected labels and rationales, preserves related-case splits, and binds content, public policy text, source Git commit, and rubric hashes. The offline `reviewHtml` helper renders the queue without external resources or model answers. A reviewer can leave a label blank or select uncertain / needs context, download JSON explicitly, and resume that draft locally. Nothing is submitted or automatically saved. Do not inspect original fixture labels while reviewing.
+
+Import a downloaded bundle against the original queue:
+
+```sh
+node scripts/moderation-review.mjs --queue moderation-queue.json --review bitsocial-human-review.json --out human-review-v1
+node scripts/moderation-evaluate.mjs --corpus human-review-v1.corpus.json
+```
+
+The first command writes a decided-only native corpus, split assignments, a full provenance/pending manifest, and a frozen corpus when both splits contain decided examples. It refuses existing output paths, mismatched queue/content identities, duplicate/conflicting labels, invalid reviewer/date fields, and missing independent-human attestation. The second command only validates offline; it does not measure accuracy. If all answers remain pending, no evaluator corpus is created. Pending examples retain their original split in the manifest and are excluded from accuracy rather than counted as allows. Do not call an incomplete holdout final; finish or explicitly report its pending coverage before evaluating it.
+
+Human-reviewed synthetic fixtures remain synthetic and cannot satisfy real-world calibration support. This adapter intentionally has no private-traffic importer. The existing synthetic holdout was already exercised as regression coverage; it is not a new independent real-world holdout. Real moderation evaluation still needs an explicitly authorized sanitized source and independent labels. Reviewer identity is an attestation, not cryptographic identity verification. Queue hashes detect mismatches against the retained original; keep that original outside the reviewer's edits. The handoff makes no provider calls or credential reads, records model identity as null when no model has run, and changes no runtime threshold. Free-text input must already be sanitized; a common-secret guard cannot establish privacy.
