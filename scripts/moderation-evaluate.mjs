@@ -12,6 +12,37 @@ const verdicts = ["allow", "review"];
 export const sha256 = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const nonnegative = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
 const probability = (value) => nonnegative(value) && value <= 1;
+const evaluatedFactories = new WeakSet();
+let evaluationActive = false;
+
+const jevContrastExamples = {
+    allow: "Boundary example: under a rule prohibiting sale offers, asking how to estimate an object's value is not itself an offer to sell. Apply the actual supplied policy; these illustrations introduce no additional rules.",
+    review: "Boundary example: under that same rule, an explicit offer of an object for a stated price crosses the sale-offer rule even if the wording is polite. Mere shared vocabulary or missing context does not establish a violation."
+};
+export function validateJevRubric(rubric) {
+    if (!["baseline", "contrastive"].includes(rubric)) throw new Error("Jev rubric must be baseline or contrastive");
+    return rubric;
+}
+
+// Evaluation-only transform: production request construction and cache identity are untouched.
+export function evaluationJevBody(body, rubric = "baseline") {
+    validateJevRubric(rubric);
+    if (rubric === "baseline") return body;
+    const input = JSON.parse(body);
+    const question = input?.questions?.decision;
+    if (
+        !object(input) ||
+        Object.keys(input.questions ?? {}).length !== 1 ||
+        question?.type !== "choice" ||
+        typeof question.instructions !== "string" ||
+        !object(question.criteria) ||
+        Object.keys(question.criteria).length !== 2 ||
+        verdicts.some((key) => typeof question.criteria[key] !== "string")
+    )
+        throw new Error("Unsupported Jev request for rubric experiment");
+    question.criteria = Object.fromEntries(verdicts.map((key) => [key, `${question.criteria[key]} ${jevContrastExamples[key]}`]));
+    return JSON.stringify(input);
+}
 export function validateObservation(item) {
     if (!object(item) || !label(item.id) || ![...verdicts, "error"].includes(item.verdict)) throw new Error("Invalid observation");
     for (const key of ["elapsedMs", "estimatedCostUsd"])
@@ -204,9 +235,19 @@ export function validateProfile(profile, env = process.env) {
 export async function liveEvaluation(
     corpus,
     profile,
-    { maxRequests, maxRequestBytes, factory, fetchImpl = globalThis.fetch, env = process.env, rates, runtimeSha256 = null }
+    {
+        maxRequests,
+        maxRequestBytes,
+        factory,
+        fetchImpl = globalThis.fetch,
+        env = process.env,
+        rates,
+        runtimeSha256 = null,
+        jevRubric = "baseline"
+    }
 ) {
     validateCorpus(corpus);
+    validateJevRubric(jevRubric);
     if (
         !Number.isInteger(maxRequests) ||
         maxRequests < 1 ||
@@ -217,16 +258,40 @@ export async function liveEvaluation(
     )
         throw new Error("Explicit request/byte budgets required");
     const options = validateProfile(profile, env);
-    const root = await mkdtemp(join(tmpdir(), "bitsocial-moderation-eval-"));
+    const jevEndpoint = options.jevApiUrl ?? "https://api.typesafe.ai/v1/systemone";
+    if (
+        jevRubric === "contrastive" &&
+        (options.jevMode !== "triage" || jevEndpoint.replace(/\/$/, "") !== "https://api.typesafe.ai/v1/systemone")
+    )
+        throw new Error("Contrastive trial requires Jev triage at the official TypeSafe endpoint");
+    const jevQuestionHashes = new Set();
+    const usage = createUsageReport(rates);
+    // The runtime owns a module-global decision cache; factory() does not clear it.
+    // The fetch wrapper is also process-global, so evaluations must not overlap.
+    if (typeof factory !== "function" || evaluatedFactories.has(factory) || evaluationActive)
+        throw new Error("Run each evaluation in a separate process with a fresh runtime factory");
+    evaluatedFactories.add(factory);
+    evaluationActive = true;
+    let root;
+    try {
+        root = await mkdtemp(join(tmpdir(), "bitsocial-moderation-eval-"));
+    } catch (error) {
+        evaluationActive = false;
+        throw error;
+    }
     const originalFetch = globalThis.fetch;
     let requests = 0,
         requestBytes = 0,
         budgetExceeded = false;
-    const usage = createUsageReport(rates);
     const predictions = [];
     const observedOutcomes = new Map();
     try {
         globalThis.fetch = async (url, init) => {
+            if (jevRubric === "contrastive" && String(url).replace(/\/$/, "") === jevEndpoint.replace(/\/$/, "")) {
+                const body = evaluationJevBody(init?.body, jevRubric);
+                jevQuestionHashes.add(sha256(JSON.parse(body).questions));
+                init = { ...init, body };
+            }
             const bytes = Buffer.byteLength(typeof init?.body === "string" ? init.body : "");
             if (requests >= maxRequests || requestBytes + bytes > maxRequestBytes) {
                 budgetExceeded = true;
@@ -331,6 +396,7 @@ export async function liveEvaluation(
         }
     } finally {
         globalThis.fetch = originalFetch;
+        evaluationActive = false;
         await rm(root, { recursive: true, force: true });
     }
     return {
@@ -341,7 +407,20 @@ export async function liveEvaluation(
         requests,
         requestBytes,
         corpusSha256: sha256(corpus),
-        profileSha256: sha256(profile.options),
+        profileSha256: sha256(
+            jevRubric === "baseline" ? profile.options : { options: profile.options, jevRubric, examples: jevContrastExamples }
+        ),
+        jevRubric,
+        ...(jevRubric === "contrastive"
+            ? {
+                  rubricExperiment: {
+                      version: 1,
+                      examplesSha256: sha256(jevContrastExamples),
+                      questionHashes: [...jevQuestionHashes],
+                      note: "Evaluation-only authored contrasts; not human-calibrated. Runtime policy and thresholds are unchanged."
+                  }
+              }
+            : {}),
         jevModel: /^jev-\d+\.\d+\.\d+$/.test(options.jevModel ?? "") ? options.jevModel : null,
         runtimeSha256,
         predictions,
@@ -353,7 +432,7 @@ export async function liveEvaluation(
 export async function evaluationMain(args) {
     if (args.includes("--help")) {
         console.log(
-            "node scripts/moderation-evaluate.mjs [--corpus evaluations/moderation-corpus.json] [--predictions predictions.json]\nLive (opt-in): --live --profile profile.json --max-requests N --max-request-bytes N [--rates rates.json]\nDefault validates corpus offline. Live mode requires a fresh build and credential environment variables."
+            "node scripts/moderation-evaluate.mjs [--corpus evaluations/moderation-corpus.json] [--predictions predictions.json]\nLive (opt-in): --live --profile profile.json --max-requests N --max-request-bytes N [--rates rates.json] [--jev-rubric baseline|contrastive]\nDefault validates corpus offline. Live mode requires a fresh build and credential environment variables."
         );
         return;
     }
@@ -363,13 +442,14 @@ export async function evaluationMain(args) {
         if (Object.hasOwn(flags, flag)) throw new Error("Duplicate flag");
         if (flag === "--live") flags[flag] = true;
         else if (
-            ["--corpus", "--predictions", "--profile", "--max-requests", "--max-request-bytes", "--rates"].includes(flag) &&
+            ["--corpus", "--predictions", "--profile", "--max-requests", "--max-request-bytes", "--rates", "--jev-rubric"].includes(flag) &&
             args[i + 1]
         )
             flags[flag] = args[++i];
         else throw new Error("Unknown flag or missing value");
     }
-    if (!flags["--live"] && ["--profile", "--max-requests", "--max-request-bytes", "--rates"].some((flag) => flags[flag]))
+    validateJevRubric(flags["--jev-rubric"] ?? "baseline");
+    if (!flags["--live"] && ["--profile", "--max-requests", "--max-request-bytes", "--rates", "--jev-rubric"].some((flag) => flags[flag]))
         throw new Error("Live settings require --live");
     if (flags["--live"] && flags["--predictions"]) throw new Error("Choose live or saved predictions");
     const corpus = validateCorpus(
@@ -384,6 +464,7 @@ export async function evaluationMain(args) {
             maxRequests: Number(flags["--max-requests"]),
             maxRequestBytes: Number(flags["--max-request-bytes"]),
             factory,
+            jevRubric: flags["--jev-rubric"] ?? "baseline",
             rates: flags["--rates"] ? JSON.parse(await readFile(flags["--rates"], "utf8")) : undefined,
             runtimeSha256: createHash("sha256")
                 .update(await readFile(new URL("../dist/index.js", import.meta.url)))

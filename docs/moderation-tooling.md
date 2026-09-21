@@ -71,7 +71,7 @@ node scripts/moderation-evaluate.mjs \
 
 Provide the environment variables named in the profile through your private secret-loading mechanism; never put credential values into profiles, fixtures, shell history, or reports. Review the example's exact endpoints and model access first. Copy the profile to a private file and change `id` and `jevMode` to `off` for a Luna/Grok baseline. Comparisons use the same labeled corpus, built runtime, default public moderation policy, and per-case rules. Custom production prompt files are intentionally not loaded by this runner. Profile options are limited to provider settings; shadow mode is disallowed because it would launch unawaited requests. No community is contacted and no publication is submitted.
 
-The request budget covers **all** provider calls, including fallback/retry attempts; the UTF-8 byte budget covers complete serialized outgoing bodies, not tokens or dollar spend. Neither is a precise monetary cap. Requests are sequential, provider deadlines remain in force, and redirects are refused. When either budget is exhausted, further network calls are blocked and unprocessed cases are marked missing. Run each profile in a separate process and rebuild after source changes; the challenge intentionally reuses identical in-process decisions.
+The request budget covers **all** provider calls, including fallback/retry attempts; the UTF-8 byte budget covers complete serialized outgoing bodies, not tokens or dollar spend. Neither is a precise monetary cap. Requests are sequential, provider deadlines remain in force, and redirects are refused. When either budget is exhausted, further network calls are blocked and unprocessed cases are marked missing. Run each profile and rubric in a separate process and rebuild after source changes; the challenge intentionally reuses identical in-process decisions. The exported evaluator rejects reused factory functions and overlapping runs; do not wrap or pre-use a runtime factory to bypass this guard.
 
 Live mode temporarily writes the normal audit into a private operating-system temp directory to distinguish review from provider failure and extract actual attempt telemetry. It removes that directory even on ordinary failure. A hard process kill can leave a temporary directory; its synthetic/sanitized publication data remains private and no prompt or key is recorded by the runtime. Reports include a corpus hash, case IDs, label provenance, outcomes, and aggregate usage (including host/model identifiers, as in the usage report); raw request/response content and provider errors are not emitted.
 
@@ -136,6 +136,28 @@ The seeded random audit samples the full eligible pool first, then uncertainty s
 ## Recency regression evidence
 
 The previous runtime transmitted date strings and instructed the model to subtract them; it did not perform age arithmetic. The earlier synthetic evaluation found inconsistent decisions around a 48-hour window. The new regression also demonstrates that the former runtime accepted an expired article whenever a provider answered allow. With `articleMaxAgeHours` configured, that case now reviews without a provider request. Boundary/future/missing dates still reach the normal cascade to check other rules. The tests run without network or credentials; they verify runtime behavior, not model accuracy.
+
+## Contrastive Jev rubric trial
+
+Live evaluation accepts `--jev-rubric baseline|contrastive`; baseline is the default and preserves the runtime request unchanged.
+The contrastive variant appends illustrative sale-offer boundaries to Jev's existing two criteria, without modifying the public policy, community rules, uncertain-evidence semantics or fallback prompts.
+It requires `jevMode: "triage"` at the official TypeSafe endpoint and runs only inside the evaluator's temporary request wrapper.
+Production `src/jev.ts`, thresholds, caches and deployed services are unchanged.
+
+```sh
+# Use the same independently labeled corpus, built runtime, profile and budgets for both runs.
+node scripts/moderation-evaluate.mjs --live --corpus reviewed-calibration.json \
+    --profile evaluations/jev-cascade.example.json --max-requests 36 --max-request-bytes 300000 \
+    --jev-rubric baseline > baseline.json
+node scripts/moderation-evaluate.mjs --live --corpus reviewed-calibration.json \
+    --profile evaluations/jev-cascade.example.json --max-requests 36 --max-request-bytes 300000 \
+    --jev-rubric contrastive > contrastive.json
+```
+
+The byte budget includes the expanded prompt. Reports identify the variant, hashed example text and transformed question hashes; profile identity also changes for the trial.
+An empty question-hash list means no Jev request was transformed (for example, deterministic policy checks handled every case), not evidence for the new rubric.
+These are authored illustrations, not learned human labels. Finish the blind review, revise only against calibration groups, freeze the questions and corpus, then use a separate untouched holdout.
+The supplied synthetic fixtures are regression inputs, not representative moderation accuracy evidence. Do not promote the trial or tune thresholds from them.
 
 ## Blind human review handoff
 
