@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { constants as fsConstants } from "node:fs";
 import { access, chmod, mkdir, open, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import PKC from "@pkcprotocol/pkc-js";
 
 const DEFAULT_AUDIT_LOG_PATH = "~/.bitsocial-ai-moderation-audit.jsonl";
@@ -12,6 +13,8 @@ const DEFAULT_PKC_RPC_URL = "ws://localhost:9138/";
 const DEFAULT_INTERVAL_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_POST_CONTENT_CHARS = 12000;
+// Same archive retention as 5chan-board-manager's default.
+const DEFAULT_ARCHIVE_PURGE_SECONDS = 172800;
 
 const usage = () => `Usage: node scripts/publish-audit-log-to-community.mjs --community <address-or-name> [options]
 
@@ -26,12 +29,16 @@ Options:
   --interval-ms <number>   Poll interval in --follow mode (default: ${DEFAULT_INTERVAL_MS})
   --timeout-ms <number>    Per-publication timeout (default: ${DEFAULT_TIMEOUT_MS})
   --from-start             Process the audit file from byte 0 when no state file exists
+  --keep-posts <number>    Archive the posts this publisher made beyond the newest <number> (default: keep all).
+                            The signer must be a moderator of the mod-log community.
+  --archive-purge-seconds <number>
+                            Purge archived posts this long after archiving them (default: ${DEFAULT_ARCHIVE_PURGE_SECONDS})
   --follow                 Keep polling for new entries
   --dry-run                Print formatted posts without publishing
   --help                   Show this help text
 `;
 
-const parseArgs = (argv) => {
+export const parseArgs = (argv) => {
     const args = {
         auditLog: DEFAULT_AUDIT_LOG_PATH,
         state: DEFAULT_STATE_PATH,
@@ -40,6 +47,7 @@ const parseArgs = (argv) => {
         pkcRpcUrl: DEFAULT_PKC_RPC_URL,
         intervalMs: DEFAULT_INTERVAL_MS,
         timeoutMs: DEFAULT_TIMEOUT_MS,
+        archivePurgeSeconds: DEFAULT_ARCHIVE_PURGE_SECONDS,
         fromStart: false,
         follow: false,
         dryRun: false
@@ -75,6 +83,10 @@ const parseArgs = (argv) => {
             args.intervalMs = Number(readValue());
         } else if (arg === "--timeout-ms") {
             args.timeoutMs = Number(readValue());
+        } else if (arg === "--keep-posts") {
+            args.keepPosts = Number(readValue());
+        } else if (arg === "--archive-purge-seconds") {
+            args.archivePurgeSeconds = Number(readValue());
         } else if (arg === "--from-start") {
             args.fromStart = true;
         } else if (arg === "--follow") {
@@ -89,6 +101,12 @@ const parseArgs = (argv) => {
     if (!args.community) throw new Error("--community is required");
     if (!Number.isFinite(args.intervalMs) || args.intervalMs <= 0) throw new Error("--interval-ms must be positive");
     if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) throw new Error("--timeout-ms must be positive");
+    if (args.keepPosts !== undefined && (!Number.isInteger(args.keepPosts) || args.keepPosts < 0)) {
+        throw new Error("--keep-posts must be a non-negative integer");
+    }
+    if (!Number.isFinite(args.archivePurgeSeconds) || args.archivePurgeSeconds < 0) {
+        throw new Error("--archive-purge-seconds must be zero or positive");
+    }
     return args;
 };
 
@@ -230,58 +248,111 @@ const formatPost = (rawEntry) => {
     };
 };
 
-const publishPost = async ({ pkc, signer, community, entry, timeoutMs, challengeAnswer }) => {
-    const post = formatPost(entry);
-    const createOptions = {
-        communityAddress: community,
-        author: { displayName: "AI moderation log" },
-        signer,
-        title: post.title,
-        content: post.content,
-        timestamp: Math.round(Date.now() / 1000)
-    };
+class PublicationRejectedError extends Error {}
 
-    if (challengeAnswer) {
-        createOptions.challengeRequest = {
-            challengeAnswers: [challengeAnswer]
-        };
-    }
-
-    const comment = await pkc.createComment(createOptions);
-
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`Timed out publishing audit entry ${entry.cacheKey || ""}`)), timeoutMs);
+const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, label }) =>
+    new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error(`Timed out publishing ${label}`)), timeoutMs);
         timeout.unref?.();
 
-        comment.on("challenge", () => {
+        publication.on("challenge", () => {
             if (!challengeAnswer) {
                 clearTimeout(timeout);
                 reject(new Error("Mod log community requested a challenge answer, but no challenge answer was configured"));
                 return;
             }
 
-            comment.publishChallengeAnswers([challengeAnswer]).catch(reject);
+            publication.publishChallengeAnswers({ challengeAnswers: [challengeAnswer] }).catch(reject);
         });
-        comment.on("challengeverification", (verification) => {
+        publication.on("challengeverification", (verification) => {
             clearTimeout(timeout);
             if (verification?.challengeSuccess === false) {
-                reject(new Error(`Mod log community rejected audit entry: ${verification.reason || "unknown reason"}`));
+                reject(new PublicationRejectedError(`Mod log community rejected ${label}: ${verification.reason || "unknown reason"}`));
                 return;
             }
-            resolve();
+            resolve(verification);
         });
-        comment.on("error", (error) => {
+        publication.on("error", (error) => {
             clearTimeout(timeout);
             reject(error);
         });
 
-        comment.publish().catch((error) => {
+        publication.publish().catch((error) => {
             clearTimeout(timeout);
             reject(error);
         });
     });
 
-    return post;
+const challengeRequestOptions = (challengeAnswer) => (challengeAnswer ? { challengeRequest: { challengeAnswers: [challengeAnswer] } } : {});
+
+const publishPost = async ({ pkc, signer, community, entry, timeoutMs, challengeAnswer }) => {
+    const post = formatPost(entry);
+    const comment = await pkc.createComment({
+        communityAddress: community,
+        author: { displayName: "AI moderation log" },
+        signer,
+        title: post.title,
+        content: post.content,
+        timestamp: Math.round(Date.now() / 1000),
+        ...challengeRequestOptions(challengeAnswer)
+    });
+    const verification = await publishWithChallengeAnswer(comment, {
+        challengeAnswer,
+        timeoutMs,
+        label: `audit entry ${entry.cacheKey || ""}`
+    });
+    return { ...post, cid: verification?.commentUpdate?.cid ?? comment.cid };
+};
+
+const moderate = async ({ pkc, signer, community, cid, commentModeration, timeoutMs, challengeAnswer }) => {
+    const moderation = await pkc.createCommentModeration({
+        communityAddress: community,
+        signer,
+        commentCid: cid,
+        commentModeration,
+        ...challengeRequestOptions(challengeAnswer)
+    });
+    await publishWithChallengeAnswer(moderation, { challengeAnswer, timeoutMs, label: `moderation of ${cid}` });
+};
+
+// Keeps the mod log bounded the way 5chan-board-manager bounds a board: posts beyond the newest --keep-posts are
+// archived, and archived posts are purged after --archive-purge-seconds. Only posts this publisher recorded in its
+// state are touched. Any failure other than a rejection stops the pass and leaves the entry for the next one.
+export const pruneModLog = async ({ args, pkc, signer, state, challengeAnswer, now = Math.round(Date.now() / 1000), save }) => {
+    if (args.keepPosts === undefined || args.dryRun) return;
+    state.posts ??= [];
+    state.archived ??= [];
+    const options = { pkc, signer, community: args.community, timeoutMs: args.timeoutMs, challengeAnswer };
+
+    // Resolves false when the community rejects the moderation; it cannot succeed later, so the entry is dropped.
+    const run = async (cid, commentModeration) => {
+        try {
+            await moderate({ ...options, cid, commentModeration });
+            return true;
+        } catch (error) {
+            if (!(error instanceof PublicationRejectedError)) throw error;
+            console.error(error.message);
+            return false;
+        }
+    };
+
+    while (state.posts.length > args.keepPosts) {
+        const [oldest] = state.posts;
+        const archived = await run(oldest.cid, {
+            archived: true,
+            reason: `AI moderation log: archived, older than the newest ${args.keepPosts} entries`
+        });
+        state.posts.shift();
+        if (archived) state.archived.push({ cid: oldest.cid, archivedAt: now });
+        await save();
+    }
+
+    while (state.archived.length > 0 && now - state.archived[0].archivedAt >= args.archivePurgeSeconds) {
+        const [expired] = state.archived;
+        await run(expired.cid, { purged: true, reason: "AI moderation log: purged, archive retention expired" });
+        state.archived.shift();
+        await save();
+    }
 };
 
 const readNewLines = async ({ auditLogPath, state, fromStart }) => {
@@ -333,7 +404,7 @@ const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
             const post = formatPost(entry);
             console.log(`--- ${post.title} ---\n${post.content}\n`);
         } else {
-            await publishPost({
+            const { cid } = await publishPost({
                 pkc,
                 signer,
                 community: args.community,
@@ -341,6 +412,10 @@ const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
                 timeoutMs: args.timeoutMs,
                 challengeAnswer
             });
+            if (args.keepPosts !== undefined && cid) {
+                state.posts ??= [];
+                state.posts.push({ cid, publishedAt: Math.round(Date.now() / 1000) });
+            }
             state.offset = offsetAfter;
             state.updatedAt = new Date().toISOString();
             state.auditLog = args.auditLog;
@@ -368,6 +443,12 @@ const main = async () => {
     args.challengeAnswerFile = expandHome(args.challengeAnswerFile);
 
     let state = await readJsonFile(args.state, {});
+    if (state.community && state.community !== args.community && (state.posts?.length || state.archived?.length)) {
+        // Tracked posts belong to the previous mod-log community; never moderate them in the new one.
+        console.log(`Mod log community changed from ${state.community}; no longer tracking its posts for archiving`);
+        state.posts = [];
+        state.archived = [];
+    }
     const challengeAnswer = args.challengeAnswer || (await readOptionalTextFile(args.challengeAnswerFile));
     const pkc = args.dryRun ? undefined : await PKC({ pkcRpcClientsOptions: [args.pkcRpcUrl], resolveAuthorNames: false });
     const signer = pkc ? await loadOrCreateSigner(pkc, args.signer) : undefined;
@@ -379,6 +460,7 @@ const main = async () => {
                 const verb = args.dryRun ? "Formatted" : "Published";
                 console.log(`${verb} ${publishedCount} moderation audit entries to ${args.community}`);
             }
+            await pruneModLog({ args, pkc, signer, state, challengeAnswer, save: () => writeJsonFile(args.state, state, 0o600) });
             state = await readJsonFile(args.state, state);
             if (args.follow) await sleep(args.intervalMs);
         } while (args.follow);
@@ -387,7 +469,9 @@ const main = async () => {
     }
 };
 
-main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+    main().catch((error) => {
+        console.error(error instanceof Error ? error.message : error);
+        process.exitCode = 1;
+    });
+}
