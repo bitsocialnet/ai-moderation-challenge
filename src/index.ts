@@ -820,8 +820,8 @@ const getModelPublicationTarget = (target: PublicationTarget, articleMaxAgeHours
     });
     return {
         kind: target.kind,
-        content: target.content,
-        title: target.title,
+        content: target.content && redactBase64Runs(target.content),
+        title: target.title && redactBase64Runs(target.title),
         link: target.link,
         flags: target.flags,
         flairs: target.flairs,
@@ -1079,6 +1079,21 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 
 const truncate = (value: string, maxLength: number) => (value.length > maxLength ? `${value.slice(0, maxLength)}...` : value);
 
+// pkc-js caps link at 2000 characters but not content or title, only the whole publication at 40kb, so a
+// pasted base64 blob (typically a data: URI image) can fill most of a prompt. The model cannot decode it, so
+// keep a short prefix and the size: enough to show what was there at a fraction of the tokens. Runs may be
+// line-wrapped, as MIME and PEM base64 are, so whitespace between long segments continues the run.
+const BASE64_RUN_PATTERN = /(?:[A-Za-z0-9+/]{32,}={0,2}\s+)*[A-Za-z0-9+/]{32,}={0,2}/g;
+const MIN_REDACTED_BASE64_RUN_CHARS = 256;
+const KEPT_BASE64_RUN_PREFIX_CHARS = 32;
+
+const redactBase64Runs = (value: string) =>
+    value.replace(BASE64_RUN_PATTERN, (run) => {
+        const runLength = run.replace(/\s/g, "").length;
+        if (runLength < MIN_REDACTED_BASE64_RUN_CHARS) return run;
+        return `${run.slice(0, KEPT_BASE64_RUN_PREFIX_CHARS)}...[${runLength - KEPT_BASE64_RUN_PREFIX_CHARS} more characters of base64-like data omitted]`;
+    });
+
 const median = (values: number[]) => {
     if (!values.length) return undefined;
     const sorted = [...values].sort((a, b) => a - b);
@@ -1158,8 +1173,8 @@ const toDuplicatePostContext = (row: DuplicatePostRow, targetTimestamp: number):
         ageSeconds: Math.max(0, Math.round(targetTimestamp - row.timestamp))
     };
 
-    if (row.title) post.title = truncate(row.title, MAX_DUPLICATE_CONTEXT_TITLE_CHARS);
-    if (row.content) post.content = truncate(row.content, MAX_DUPLICATE_CONTEXT_CONTENT_CHARS);
+    if (row.title) post.title = truncate(redactBase64Runs(row.title), MAX_DUPLICATE_CONTEXT_TITLE_CHARS);
+    if (row.content) post.content = truncate(redactBase64Runs(row.content), MAX_DUPLICATE_CONTEXT_CONTENT_CHARS);
     const link = linkTarget({ link: row.link, htmlTagName: row.linkHtmlTagName });
     if (link) {
         post.link = {

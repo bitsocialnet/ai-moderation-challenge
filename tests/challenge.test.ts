@@ -555,6 +555,39 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(userPayload.publication.content).toBe("Buy cheap pills at spam.example now.");
     });
 
+    it("cuts long base64 runs out of the model prompt", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const blob = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ".repeat(100);
+        const wrappedBlob = blob.match(/.{1,76}/g)?.join("\n") ?? blob;
+        const shortBase64 = blob.slice(0, 88);
+        const omitted = `${blob.slice(0, 32)}...[${blob.length - 32} more characters of base64-like data omitted]`;
+
+        const result = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/base64-redaction", prompt: "private prompt" }),
+            challengeRequestMessage: createCommentRequest(`look ![](data:image/png;base64,${blob}) sig ${shortBase64}`, {
+                comment: { title: `pasted ${wrappedBlob}` }
+            }),
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows(
+                [{ title: "older post", content: `data:image/png;base64,${blob}`, timestamp: 1_777_962_466, totalTopLevelPosts: 22 }],
+                []
+            )
+        });
+
+        expect(result).toEqual({ success: true });
+        const body = getRequestBody(fetchMock);
+        const input = body.input as Array<{ role: string; content: string }>;
+        const userPayload = JSON.parse(input[1].content) as {
+            community: { duplicateCheck: { recentTopLevelPosts: Array<{ content?: string }> } };
+            publication: { content: string; title: string };
+        };
+        expect(userPayload.publication.content).toBe(`look ![](data:image/png;base64,${omitted}) sig ${shortBase64}`);
+        expect(userPayload.publication.title).toBe(`pasted ${omitted}`);
+        expect(userPayload.community.duplicateCheck.recentTopLevelPosts[0]?.content).toBe(`data:image/png;base64,${omitted}`);
+        expect(input[1].content).not.toContain(blob.slice(0, 256));
+    });
+
     it("links rule references already present in model review reasons", async () => {
         const fetchMock = stubFetch(
             createModelResponse({
