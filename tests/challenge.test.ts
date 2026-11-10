@@ -1767,6 +1767,113 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("releases an in-flight media reservation when the allow branch rejects the publication", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("network down"))
+            .mockResolvedValueOnce(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_600;
+        const mediaUrl = "https://cdn.example.com/rejected-then-retried.png";
+        const reservationCommunity = {
+            ...createCommunityWithDuplicateRows([]),
+            address: "reservation-release-test.bso"
+        } as unknown as LocalCommunity;
+        const allowOnlySettings = settings({
+            apiUrl: "https://provider.example/reservation-release",
+            branch: "allow",
+            rejectDuplicateMedia: "true"
+        });
+
+        const rejectedResult = await challengeFile.getChallenge({
+            challengeSettings: allowOnlySettings,
+            challengeRequestMessage: createCommentRequest("media post rejected during an outage", {
+                comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp },
+                request: { challengeRequestId: new Uint8Array([30, 31, 32, 33]) }
+            }),
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+        const resignedRetryResult = await challengeFile.getChallenge({
+            challengeSettings: allowOnlySettings,
+            challengeRequestMessage: createCommentRequest("media post rejected during an outage", {
+                comment: {
+                    link: mediaUrl,
+                    linkHtmlTagName: "img",
+                    signature: { publicKey: "signature-public-key-1", signature: "signature-value-resigned" },
+                    timestamp: targetTimestamp + 40
+                },
+                request: { challengeRequestId: new Uint8Array([34, 35, 36, 37]) }
+            }),
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+
+        expect(rejectedResult).toEqual({ success: false, error: "network down" });
+        expect(resignedRetryResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps an in-flight media reservation when the review branch queues a publication the allow branch rejected", async () => {
+        const fetchMock = stubFetch(createModelResponse({ verdict: "review", reason: "Rule 1", matchedRuleIndexes: [0] }));
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_000_900;
+        const mediaUrl = "https://cdn.example.com/queued-for-review.png";
+        const reservationCommunity = {
+            ...createCommunityWithDuplicateRows([]),
+            address: "reservation-review-test.bso"
+        } as unknown as LocalCommunity;
+        const request = createCommentRequest("media post queued for review", {
+            comment: { link: mediaUrl, linkHtmlTagName: "img", timestamp: targetTimestamp },
+            request: { challengeRequestId: new Uint8Array([40, 41, 42, 43]) }
+        });
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation-review",
+                branch: "allow",
+                rejectDuplicateMedia: "true"
+            }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation-review",
+                branch: "review",
+                rejectDuplicateMedia: "true"
+            }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community: reservationCommunity
+        });
+        const competingResult = await challengeFile.getChallenge({
+            challengeSettings: settings({
+                apiUrl: "https://provider.example/reservation-review",
+                branch: "allow",
+                rejectDuplicateMedia: "true"
+            }),
+            challengeRequestMessage: createCommentRequest("competing media post", {
+                comment: {
+                    link: mediaUrl,
+                    linkHtmlTagName: "img",
+                    signature: { publicKey: "signature-public-key-2", signature: "signature-value-competing" },
+                    timestamp: targetTimestamp + 1
+                },
+                request: { challengeRequestId: new Uint8Array([44, 45, 46, 47]) }
+            }),
+            challengeIndex: 1,
+            community: reservationCommunity
+        });
+
+        expect(allowResult).toEqual({ success: false, error: "Rule 1" });
+        expect(reviewResult).toEqual({ success: true });
+        expect(competingResult).toEqual({ success: false, error: "This media was already posted recently." });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("retries without duplicate context when a duplicate review is not supported by recent posts", async () => {
         const fetchMock = stubFetch(
             createModelResponse({
