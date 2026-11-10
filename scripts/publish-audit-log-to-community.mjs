@@ -484,6 +484,20 @@ export const processOnce = async ({ args, pkc, signer, state, challengeAnswer })
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export const loadState = async (args) => {
+    const state = await readJsonFile(args.state, {});
+    if (state.community && state.community !== args.community && (state.posts?.length || state.archived?.length)) {
+        // Tracked posts belong to the previous mod-log community; never moderate them in the new one.
+        console.log(`Mod log community changed from ${state.community}; no longer tracking its posts for archiving`);
+        state.posts = [];
+        state.archived = [];
+        state.community = args.community;
+        // Persist the reset now: every follow-mode pass reloads the state file and would bring the old posts back.
+        if (!args.dryRun) await writeJsonFile(args.state, state, 0o600);
+    }
+    return state;
+};
+
 const main = async () => {
     const args = parseArgs(process.argv.slice(2));
     args.auditLog = expandHome(args.auditLog);
@@ -491,13 +505,7 @@ const main = async () => {
     args.signer = expandHome(args.signer);
     args.challengeAnswerFile = expandHome(args.challengeAnswerFile);
 
-    let state = await readJsonFile(args.state, {});
-    if (state.community && state.community !== args.community && (state.posts?.length || state.archived?.length)) {
-        // Tracked posts belong to the previous mod-log community; never moderate them in the new one.
-        console.log(`Mod log community changed from ${state.community}; no longer tracking its posts for archiving`);
-        state.posts = [];
-        state.archived = [];
-    }
+    let state = await loadState(args);
     const challengeAnswer = args.challengeAnswer || (await readOptionalTextFile(args.challengeAnswerFile));
     const pkc = args.dryRun ? undefined : await PKC({ pkcRpcClientsOptions: [args.pkcRpcUrl], resolveAuthorNames: false });
     const signer = pkc ? await loadOrCreateSigner(pkc, args.signer) : undefined;

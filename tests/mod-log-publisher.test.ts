@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseArgs, processOnce, pruneModLog } from "../scripts/publish-audit-log-to-community.mjs";
+import { loadState, parseArgs, processOnce, pruneModLog } from "../scripts/publish-audit-log-to-community.mjs";
 
 type Outcome = "accepted" | "comment-gone" | "no-comment-to-edit" | "not-moderator" | "transport-error";
 
@@ -286,5 +286,37 @@ describe("mod-log publisher audit cursor", () => {
         await processOnce({ args, pkc, signer: {}, state });
 
         expect(await readState()).toEqual(expect.objectContaining({ offset: Buffer.byteLength(content), auditLog }));
+    });
+});
+
+describe("mod-log publisher state", () => {
+    let tempDir: string | undefined;
+
+    afterEach(async () => {
+        if (tempDir) await rm(tempDir, { recursive: true, force: true });
+        tempDir = undefined;
+    });
+
+    it("persists the reset of posts tracked for a previous mod-log community", async () => {
+        tempDir = await mkdtemp(join(tmpdir(), "bitsocial-mod-log-state-"));
+        const statePath = join(tempDir, "state.json");
+        await writeFile(
+            statePath,
+            JSON.stringify({
+                offset: 42,
+                community: "previous-modlog.example",
+                posts: posts("foreign-post"),
+                archived: [{ cid: "foreign-archived", archivedAt: 1_000 }]
+            })
+        );
+        vi.spyOn(console, "log").mockImplementation(() => {});
+
+        const state = await loadState(args(["--keep-posts", "1", "--state", statePath]));
+
+        expect(state).toEqual(expect.objectContaining({ posts: [], archived: [] }));
+        // Each follow-mode pass reloads the state file, so the reset must already be on disk.
+        expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual(
+            expect.objectContaining({ offset: 42, community: "modlog.example", posts: [], archived: [] })
+        );
     });
 });
