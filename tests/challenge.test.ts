@@ -1306,6 +1306,40 @@ describe("Bitsocial AI moderation challenge package", () => {
         expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("routes a comment to review when the first remote prompt fetch fails for the allow branch", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("prompt host unavailable"))
+            .mockResolvedValueOnce(createPromptResponse("recovered prompt"))
+            .mockResolvedValueOnce(createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] }));
+        vi.stubGlobal("fetch", fetchMock);
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const promptUrl = "https://prompt.example.com/v1/prompts/branch-pair-outage-ai-moderation.md";
+        const request = createCommentRequest("remote prompt outage across the branch pair");
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ promptUrl, branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: pendingApprovalSettings({ promptUrl, branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community
+        });
+
+        expect(allowResult).toEqual({ success: false, error: "prompt host unavailable" });
+        expect(reviewResult).toEqual({
+            success: true,
+            commentUpdate: {
+                reason: "[AI moderation](https://bitsocial.net/projects/ai-moderation-challenge) sent this post to the mod queue because the moderation service was temporarily unavailable, so manual review is required"
+            }
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
     it("fails closed when a remote prompt advertises an oversized body", async () => {
         const fetchMock = stubFetch(createPromptResponse("too large", 200, { "content-length": "65537" }));
         const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
@@ -2133,6 +2167,36 @@ describe("Bitsocial AI moderation challenge package", () => {
             challengeRequestMessage: request,
             challengeIndex: 2,
             community
+        });
+
+        expect(allowResult).toEqual({ success: false, error: "Rule 1" });
+        expect(reviewResult).toEqual({ success: true });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("reuses the allow branch verdict when a new top-level post lands before the review branch", async () => {
+        const fetchMock = stubFetch(
+            createModelResponse({ verdict: "review", reason: "Rule 1", matchedRuleIndexes: [0] }),
+            createModelResponse({ verdict: "allow", reason: "", matchedRuleIndexes: [] })
+        );
+        const challengeFile = ChallengeFileFactory({} as CommunityChallengeSetting);
+        const targetTimestamp = 1_780_100_000;
+        const request = createCommentRequest("review verdict while the board changes", {
+            comment: { link: undefined, linkHtmlTagName: undefined, timestamp: targetTimestamp }
+        });
+        const newTopLevelPost = { title: "Committed during the allow branch", timestamp: targetTimestamp - 5, totalTopLevelPosts: 1 };
+
+        const allowResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/branch-pair-board-change", branch: "allow" }),
+            challengeRequestMessage: request,
+            challengeIndex: 1,
+            community: createCommunityWithDuplicateRows([], [])
+        });
+        const reviewResult = await challengeFile.getChallenge({
+            challengeSettings: settings({ apiUrl: "https://provider.example/branch-pair-board-change", branch: "review" }),
+            challengeRequestMessage: request,
+            challengeIndex: 2,
+            community: createCommunityWithDuplicateRows([newTopLevelPost], [])
         });
 
         expect(allowResult).toEqual({ success: false, error: "Rule 1" });

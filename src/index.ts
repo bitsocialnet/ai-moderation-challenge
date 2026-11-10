@@ -34,6 +34,7 @@ const LEGACY_RUNTIME_COMMUNITY_KEY = String.fromCharCode(115, 117, 98, 112, 108,
 const MAX_CACHE_ENTRIES = 1000;
 const MAX_JSON_CACHE_ENTRIES = 10_000;
 const FAILED_CACHE_TTL_MS = 30_000;
+const BRANCH_PAIR_REUSE_TTL_MS = 30_000;
 const MAX_DUPLICATE_CANDIDATE_POSTS = 64;
 const MIN_DUPLICATE_CONTEXT_POSTS = 8;
 const MAX_DUPLICATE_CONTEXT_POSTS = 32;
@@ -459,6 +460,7 @@ type DuplicateMediaReservation = {
 };
 
 const evaluateCache = new Map<string, Promise<ModelVerdict>>();
+const publicationEvaluations = new Map<string, Promise<ModelVerdict>>();
 const jsonCacheWrites = new Map<string, Promise<void>>();
 const auditLogWrites = new Map<string, Promise<void>>();
 const duplicateMediaReservations = new Map<string, DuplicateMediaReservation>();
@@ -2223,7 +2225,7 @@ const requestCascadedVerdict = async ({
     });
 };
 
-const evaluate = async ({
+const evaluateContent = async ({
     target,
     communityContext,
     options
@@ -2432,6 +2434,44 @@ const evaluate = async ({
 
     addCachedPromise(cacheKey, promise);
     return promise;
+};
+
+const getPublicationEvaluationKey = (target: PublicationTarget, communityContext: CommunityContext, options: ParsedOptions) => {
+    if (!target.signatureHash && !target.challengeRequestIdHash) return undefined;
+    const { branch: _branch, error: _error, rejectDuplicateMedia: _rejectDuplicateMedia, ...evaluationOptions } = options;
+    return sha256(
+        stableStringify({
+            target,
+            communityContext: withoutDuplicateCheck(communityContext),
+            options: evaluationOptions
+        })
+    );
+};
+
+// pkc-js calls the review branch right after a failed allow branch for the same request. The content cache key
+// depends on the loaded prompt and the live duplicate-check snapshot, so a prompt load failure or a top-level post
+// landing in between would otherwise give the two branches different outcomes and reject the publication outright.
+const evaluate = (args: { target: PublicationTarget; communityContext: CommunityContext; options: ParsedOptions }) => {
+    const key = getPublicationEvaluationKey(args.target, args.communityContext, args.options);
+    if (!key) return evaluateContent(args);
+
+    const existing = publicationEvaluations.get(key);
+    if (existing) return existing;
+
+    const evaluation = evaluateContent(args);
+    if (publicationEvaluations.size >= MAX_CACHE_ENTRIES) {
+        const firstKey = publicationEvaluations.keys().next().value;
+        if (typeof firstKey === "string") publicationEvaluations.delete(firstKey);
+    }
+    publicationEvaluations.set(key, evaluation);
+    const forget = () => {
+        const timeout = setTimeout(() => {
+            if (publicationEvaluations.get(key) === evaluation) publicationEvaluations.delete(key);
+        }, BRANCH_PAIR_REUSE_TTL_MS);
+        timeout.unref?.();
+    };
+    evaluation.then(forget, forget);
+    return evaluation;
 };
 
 const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInput> => {
