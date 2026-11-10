@@ -1322,6 +1322,18 @@ const getDuplicateMediaRejection = (
     return undefined;
 };
 
+// A rejected publication must not keep its media URL reserved; a paired review branch re-reserves it on its own call.
+const releaseDuplicateMediaReservation = (target: PublicationTarget, communityContext: CommunityContext) => {
+    const normalizedTargetUrl = target.link?.url ? normalizeDuplicateMediaUrl(target.link.url) : undefined;
+    const publicationIdentity = getDuplicateMediaPublicationIdentity(target);
+    if (!normalizedTargetUrl || !communityContext.address || !publicationIdentity) return;
+
+    const reservationKey = sha256(`${communityContext.address}\n${normalizedTargetUrl}`);
+    if (duplicateMediaReservations.get(reservationKey)?.publicationIdentity === publicationIdentity) {
+        duplicateMediaReservations.delete(reservationKey);
+    }
+};
+
 const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challengeRequestMessage"]): ModerationTarget | undefined => {
     const request = challengeRequestMessage as unknown as Record<string, unknown>;
     const challengeRequestIdHash = optionalHash(bytesToHex(request.challengeRequestId));
@@ -2496,13 +2508,14 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
         return { success: false, error: duplicateMediaRejection };
     }
 
+    let result: ChallengeResultInput;
     try {
         const response = await evaluate({
             target: moderationTarget.target,
             communityContext,
             options
         });
-        return getBranchResult(
+        result = getBranchResult(
             moderationTarget.kind,
             options,
             response.verdict,
@@ -2513,7 +2526,7 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
             communityContext
         );
     } catch (error) {
-        return getFallbackResult({
+        result = getFallbackResult({
             kind: moderationTarget.kind,
             options,
             error,
@@ -2522,6 +2535,11 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
             communityContext
         });
     }
+
+    if (options.rejectDuplicateMedia && options.branch === "allow" && !result.success) {
+        releaseDuplicateMediaReservation(moderationTarget.target, communityContext);
+    }
+    return result;
 };
 
 // Publishing these in community.challenges[i].publicOptions hands out a credential; every other option is
