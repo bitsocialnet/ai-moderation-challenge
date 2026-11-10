@@ -248,7 +248,21 @@ const formatPost = (rawEntry) => {
     };
 };
 
-class PublicationRejectedError extends Error {}
+// Rejection reasons meaning the comment was purged or never reached the community, so moderating it can never
+// succeed. pkc-js checks that the target exists before the moderator role and rejects with
+// ERR_PUBLICATION_PARENT_DOES_NOT_EXIST_IN_COMMUNITY; ERR_COMMENT_MODERATION_NO_COMMENT_TO_EDIT is its later check
+// for the same case. pkc-js does not export its messages, hence the copies.
+const COMMENT_GONE_REJECTION_REASONS = new Set([
+    "The parent of this publication does not exist within the community's records",
+    "CommentModerationPubsubMessagePublication is attempting to moderate a comment that does not exist"
+]);
+
+class PublicationRejectedError extends Error {
+    constructor(message, reason) {
+        super(message);
+        this.reason = reason;
+    }
+}
 
 const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, label }) =>
     new Promise((resolve, reject) => {
@@ -267,7 +281,12 @@ const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, l
         publication.on("challengeverification", (verification) => {
             clearTimeout(timeout);
             if (verification?.challengeSuccess === false) {
-                reject(new PublicationRejectedError(`Mod log community rejected ${label}: ${verification.reason || "unknown reason"}`));
+                reject(
+                    new PublicationRejectedError(
+                        `Mod log community rejected ${label}: ${verification.reason || "unknown reason"}`,
+                        verification.reason
+                    )
+                );
                 return;
             }
             resolve(verification);
@@ -317,20 +336,21 @@ const moderate = async ({ pkc, signer, community, cid, commentModeration, timeou
 
 // Keeps the mod log bounded the way 5chan-board-manager bounds a board: posts beyond the newest --keep-posts are
 // archived, and archived posts are purged after --archive-purge-seconds. Only posts this publisher recorded in its
-// state are touched. Any failure other than a rejection stops the pass and leaves the entry for the next one.
+// state are touched. Any failure other than the post being gone stops the pass and leaves the entry for the next one.
 export const pruneModLog = async ({ args, pkc, signer, state, challengeAnswer, now = Math.round(Date.now() / 1000), save }) => {
     if (args.keepPosts === undefined || args.dryRun) return;
     state.posts ??= [];
     state.archived ??= [];
     const options = { pkc, signer, community: args.community, timeoutMs: args.timeoutMs, challengeAnswer };
 
-    // Resolves false when the community rejects the moderation; it cannot succeed later, so the entry is dropped.
+    // Resolves false when the community no longer has the post; that cannot change, so the entry is dropped. Other
+    // rejections (for example a signer that is not a moderator yet) can succeed later and keep the entry tracked.
     const run = async (cid, commentModeration) => {
         try {
             await moderate({ ...options, cid, commentModeration });
             return true;
         } catch (error) {
-            if (!(error instanceof PublicationRejectedError)) throw error;
+            if (!(error instanceof PublicationRejectedError) || !COMMENT_GONE_REJECTION_REASONS.has(error.reason)) throw error;
             console.error(error.message);
             return false;
         }

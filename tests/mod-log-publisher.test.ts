@@ -2,7 +2,15 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { parseArgs, pruneModLog } from "../scripts/publish-audit-log-to-community.mjs";
 
-type Outcome = "accepted" | "rejected" | "transport-error";
+type Outcome = "accepted" | "comment-gone" | "no-comment-to-edit" | "not-moderator" | "transport-error";
+
+// Reasons pkc-js 0.0.85 puts in challengeverification for these moderation rejections. A moderation of a purged or
+// unknown comment fails the parent-existence check, which runs before the moderator check.
+const rejectionReasons: Partial<Record<Outcome, string>> = {
+    "comment-gone": "The parent of this publication does not exist within the community's records",
+    "no-comment-to-edit": "CommentModerationPubsubMessagePublication is attempting to moderate a comment that does not exist",
+    "not-moderator": "CommentModerationPubsubMessagePublication signer is not a mod at this community"
+};
 
 // Stands in for the PKC RPC client: each moderation publishes and answers with the next scripted outcome.
 const fakePkc = (outcomes: Outcome[] = []) => {
@@ -15,13 +23,9 @@ const fakePkc = (outcomes: Outcome[] = []) => {
                 publishChallengeAnswers: vi.fn(),
                 publish: async () => {
                     if (outcome === "transport-error") throw new Error("rpc connection closed");
+                    const reason = rejectionReasons[outcome];
                     setImmediate(() =>
-                        publication.emit(
-                            "challengeverification",
-                            outcome === "rejected"
-                                ? { challengeSuccess: false, reason: "comment already purged" }
-                                : { challengeSuccess: true }
-                        )
+                        publication.emit("challengeverification", reason ? { challengeSuccess: false, reason } : { challengeSuccess: true })
                     );
                 }
             });
@@ -77,8 +81,8 @@ describe("mod-log publisher pruning", () => {
         expect(state.archived).toEqual([{ cid: "recent", archivedAt: 4_500 }]);
     });
 
-    it("drops a post the community rejects and keeps one whose moderation could not be delivered", async () => {
-        const { pkc } = fakePkc(["rejected", "transport-error"]);
+    it("drops a post the community no longer has and keeps one whose moderation could not be delivered", async () => {
+        const { pkc } = fakePkc(["comment-gone", "transport-error"]);
         const state = { posts: posts("gone", "retry", "kept"), archived: [] as Array<{ cid: string; archivedAt: number }> };
         vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -88,6 +92,51 @@ describe("mod-log publisher pruning", () => {
 
         expect(state.posts.map((post) => post.cid)).toEqual(["retry", "kept"]);
         expect(state.archived).toEqual([]);
+    });
+
+    it.each(["comment-gone", "no-comment-to-edit"] as const)(
+        "drops an archived post whose purge is rejected because the community no longer has it (%s)",
+        async (outcome) => {
+            const { pkc, moderations } = fakePkc([outcome]);
+            const state = { posts: [], archived: [{ cid: "already-purged", archivedAt: 0 }] };
+            const save = vi.fn();
+            vi.spyOn(console, "error").mockImplementation(() => {});
+
+            await expect(
+                pruneModLog({ args: args(["--keep-posts", "10"]), pkc, signer: {}, state, now: 5_000_000, save })
+            ).resolves.toBeUndefined();
+
+            expect(moderations).toEqual([{ commentCid: "already-purged", commentModeration: expect.objectContaining({ purged: true }) }]);
+            expect(state.archived).toEqual([]);
+            expect(save).toHaveBeenCalledTimes(1);
+        }
+    );
+
+    it("keeps tracking posts when the community rejects a moderation the signer may make later", async () => {
+        const { pkc, moderations } = fakePkc(["not-moderator"]);
+        const state = { posts: posts("a", "b", "c"), archived: [{ cid: "old", archivedAt: 0 }] };
+        const save = vi.fn();
+        vi.spyOn(console, "error").mockImplementation(() => {});
+
+        await expect(pruneModLog({ args: args(["--keep-posts", "1"]), pkc, signer: {}, state, now: 5_000_000, save })).rejects.toThrow(
+            "signer is not a mod"
+        );
+
+        expect(moderations).toHaveLength(1);
+        expect(state.posts.map((post) => post.cid)).toEqual(["a", "b", "c"]);
+        expect(state.archived).toEqual([{ cid: "old", archivedAt: 0 }]);
+        expect(save).not.toHaveBeenCalled();
+    });
+
+    it("keeps an archived post tracked when its purge is rejected for a reason other than the post being gone", async () => {
+        const { pkc } = fakePkc(["not-moderator"]);
+        const state = { posts: [], archived: [{ cid: "old", archivedAt: 0 }] };
+
+        await expect(
+            pruneModLog({ args: args(["--keep-posts", "10"]), pkc, signer: {}, state, now: 5_000_000, save: vi.fn() })
+        ).rejects.toThrow("signer is not a mod");
+
+        expect(state.archived).toEqual([{ cid: "old", archivedAt: 0 }]);
     });
 
     it("leaves the mod log alone without --keep-posts", async () => {
