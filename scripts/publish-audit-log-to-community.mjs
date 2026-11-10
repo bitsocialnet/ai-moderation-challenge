@@ -410,16 +410,48 @@ const readNewLines = async ({ auditLogPath, state, fromStart }) => {
     }
 };
 
-const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
+const parseAuditEntry = (line) => {
+    try {
+        const entry = JSON.parse(line);
+        return entry && typeof entry === "object" ? entry : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+export const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
+    // Compare resolved paths so a relative and an absolute spelling of one file keep the same cursor.
+    const auditLog = resolve(args.auditLog);
+    if (state.offset !== undefined && typeof state.auditLog === "string" && resolve(state.auditLog) !== auditLog) {
+        // Keep the cursor while the new path does not exist, so a mistyped --audit-log cannot discard it.
+        if (!(await fileExists(args.auditLog))) return 0;
+        // A byte offset into another file lands mid-record here; read this audit log as if no state existed for it.
+        console.log(`Audit log changed from ${state.auditLog}; ignoring the offset stored for it`);
+        delete state.offset;
+    }
     const { lines, nextOffset } = await readNewLines({
         auditLogPath: args.auditLog,
         state,
         fromStart: args.fromStart
     });
 
+    const saveOffset = async (offset) => {
+        state.offset = offset;
+        state.updatedAt = new Date().toISOString();
+        state.auditLog = auditLog;
+        state.community = args.community;
+        await writeJsonFile(args.state, state, 0o600);
+    };
+
     let publishedCount = 0;
     for (const { line, offsetAfter } of lines) {
-        const entry = JSON.parse(line);
+        const entry = parseAuditEntry(line);
+        if (!entry) {
+            // An unreadable line can never be published; skip it instead of blocking every later entry behind it.
+            console.error(`Skipping audit log line ending at byte ${offsetAfter}: not a JSON object`);
+            if (!args.dryRun) await saveOffset(offsetAfter);
+            continue;
+        }
         if (args.dryRun) {
             const post = formatPost(entry);
             console.log(`--- ${post.title} ---\n${post.content}\n`);
@@ -436,17 +468,14 @@ const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
                 state.posts ??= [];
                 state.posts.push({ cid, publishedAt: Math.round(Date.now() / 1000) });
             }
-            state.offset = offsetAfter;
-            state.updatedAt = new Date().toISOString();
-            state.auditLog = args.auditLog;
-            state.community = args.community;
-            await writeJsonFile(args.state, state, 0o600);
+            await saveOffset(offsetAfter);
         }
         publishedCount += 1;
     }
 
     if (!args.dryRun && lines.length === 0 && state.offset === undefined) {
         state.offset = nextOffset;
+        state.auditLog = auditLog;
         await writeJsonFile(args.state, state, 0o600);
     }
 
