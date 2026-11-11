@@ -123,12 +123,14 @@ describe("mod-log publisher pruning", () => {
         const { pkc, moderations } = fakePkc(["not-moderator"]);
         const state = { posts: posts("a", "b", "c"), archived: [{ cid: "old", archivedAt: 0 }] };
         const save = vi.fn();
-        vi.spyOn(console, "error").mockImplementation(() => {});
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-        await expect(pruneModLog({ args: args(["--keep-posts", "1"]), pkc, signer: {}, state, now: 5_000_000, save })).rejects.toThrow(
-            "signer is not a mod"
-        );
+        // Resolving keeps a --follow publisher running, so it retries on the next pass instead of exiting.
+        await expect(
+            pruneModLog({ args: args(["--keep-posts", "1"]), pkc, signer: {}, state, now: 5_000_000, save })
+        ).resolves.toBeUndefined();
 
+        expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("signer is not a mod"));
         expect(moderations).toHaveLength(1);
         expect(state.posts.map((post) => post.cid)).toEqual(["a", "b", "c"]);
         expect(state.archived).toEqual([{ cid: "old", archivedAt: 0 }]);
@@ -138,12 +140,15 @@ describe("mod-log publisher pruning", () => {
     it("keeps an archived post tracked when its purge is rejected for a reason other than the post being gone", async () => {
         const { pkc } = fakePkc(["not-moderator"]);
         const state = { posts: [], archived: [{ cid: "old", archivedAt: 0 }] };
+        const save = vi.fn();
+        vi.spyOn(console, "error").mockImplementation(() => {});
 
         await expect(
-            pruneModLog({ args: args(["--keep-posts", "10"]), pkc, signer: {}, state, now: 5_000_000, save: vi.fn() })
-        ).rejects.toThrow("signer is not a mod");
+            pruneModLog({ args: args(["--keep-posts", "10"]), pkc, signer: {}, state, now: 5_000_000, save })
+        ).resolves.toBeUndefined();
 
         expect(state.archived).toEqual([{ cid: "old", archivedAt: 0 }]);
+        expect(save).not.toHaveBeenCalled();
     });
 
     it("leaves the mod log alone without --keep-posts", async () => {

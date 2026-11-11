@@ -343,33 +343,36 @@ export const pruneModLog = async ({ args, pkc, signer, state, challengeAnswer, n
     state.archived ??= [];
     const options = { pkc, signer, community: args.community, timeoutMs: args.timeoutMs, challengeAnswer };
 
-    // Resolves false when the community no longer has the post; that cannot change, so the entry is dropped. Other
-    // rejections (for example a signer that is not a moderator yet) can succeed later and keep the entry tracked.
+    // "gone" when the community no longer has the post; that cannot change, so the entry is dropped. Other rejections
+    // (for example a signer that is not a moderator yet) can succeed later: "retry" keeps the entry and ends the pass
+    // without throwing, so a --follow publisher keeps mirroring audit entries and retries on its next pass.
     const run = async (cid, commentModeration) => {
         try {
             await moderate({ ...options, cid, commentModeration });
-            return true;
+            return "done";
         } catch (error) {
-            if (!(error instanceof PublicationRejectedError) || !COMMENT_GONE_REJECTION_REASONS.has(error.reason)) throw error;
+            if (!(error instanceof PublicationRejectedError)) throw error;
             console.error(error.message);
-            return false;
+            return COMMENT_GONE_REJECTION_REASONS.has(error.reason) ? "gone" : "retry";
         }
     };
 
     while (state.posts.length > args.keepPosts) {
         const [oldest] = state.posts;
-        const archived = await run(oldest.cid, {
+        const outcome = await run(oldest.cid, {
             archived: true,
             reason: `AI moderation log: archived, older than the newest ${args.keepPosts} entries`
         });
+        if (outcome === "retry") return;
         state.posts.shift();
-        if (archived) state.archived.push({ cid: oldest.cid, archivedAt: now });
+        if (outcome === "done") state.archived.push({ cid: oldest.cid, archivedAt: now });
         await save();
     }
 
     while (state.archived.length > 0 && now - state.archived[0].archivedAt >= args.archivePurgeSeconds) {
         const [expired] = state.archived;
-        await run(expired.cid, { purged: true, reason: "AI moderation log: purged, archive retention expired" });
+        const outcome = await run(expired.cid, { purged: true, reason: "AI moderation log: purged, archive retention expired" });
+        if (outcome === "retry") return;
         state.archived.shift();
         await save();
     }
