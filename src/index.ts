@@ -34,6 +34,7 @@ const LEGACY_RUNTIME_COMMUNITY_KEY = String.fromCharCode(115, 117, 98, 112, 108,
 const MAX_CACHE_ENTRIES = 1000;
 const MAX_JSON_CACHE_ENTRIES = 10_000;
 const FAILED_CACHE_TTL_MS = 30_000;
+const BRANCH_PAIR_REUSE_TTL_MS = 30_000;
 const MAX_DUPLICATE_CANDIDATE_POSTS = 64;
 const MIN_DUPLICATE_CONTEXT_POSTS = 8;
 const MAX_DUPLICATE_CONTEXT_POSTS = 32;
@@ -459,6 +460,7 @@ type DuplicateMediaReservation = {
 };
 
 const evaluateCache = new Map<string, Promise<ModelVerdict>>();
+const publicationEvaluations = new Map<string, Promise<ModelVerdict>>();
 const jsonCacheWrites = new Map<string, Promise<void>>();
 const auditLogWrites = new Map<string, Promise<void>>();
 const duplicateMediaReservations = new Map<string, DuplicateMediaReservation>();
@@ -1318,6 +1320,18 @@ const getDuplicateMediaRejection = (
 
     duplicateMediaReservations.set(reservationKey, { publicationIdentity, reservedAt: now });
     return undefined;
+};
+
+// A rejected publication must not keep its media URL reserved; a paired review branch re-reserves it on its own call.
+const releaseDuplicateMediaReservation = (target: PublicationTarget, communityContext: CommunityContext) => {
+    const normalizedTargetUrl = target.link?.url ? normalizeDuplicateMediaUrl(target.link.url) : undefined;
+    const publicationIdentity = getDuplicateMediaPublicationIdentity(target);
+    if (!normalizedTargetUrl || !communityContext.address || !publicationIdentity) return;
+
+    const reservationKey = sha256(`${communityContext.address}\n${normalizedTargetUrl}`);
+    if (duplicateMediaReservations.get(reservationKey)?.publicationIdentity === publicationIdentity) {
+        duplicateMediaReservations.delete(reservationKey);
+    }
 };
 
 const getModerationTarget = (challengeRequestMessage: GetChallengeArgs["challengeRequestMessage"]): ModerationTarget | undefined => {
@@ -2223,7 +2237,7 @@ const requestCascadedVerdict = async ({
     });
 };
 
-const evaluate = async ({
+const evaluateContent = async ({
     target,
     communityContext,
     options
@@ -2434,6 +2448,44 @@ const evaluate = async ({
     return promise;
 };
 
+const getPublicationEvaluationKey = (target: PublicationTarget, communityContext: CommunityContext, options: ParsedOptions) => {
+    if (!target.signatureHash && !target.challengeRequestIdHash) return undefined;
+    const { branch: _branch, error: _error, rejectDuplicateMedia: _rejectDuplicateMedia, ...evaluationOptions } = options;
+    return sha256(
+        stableStringify({
+            target,
+            communityContext: withoutDuplicateCheck(communityContext),
+            options: evaluationOptions
+        })
+    );
+};
+
+// pkc-js calls the review branch right after a failed allow branch for the same request. The content cache key
+// depends on the loaded prompt and the live duplicate-check snapshot, so a prompt load failure or a top-level post
+// landing in between would otherwise give the two branches different outcomes and reject the publication outright.
+const evaluate = (args: { target: PublicationTarget; communityContext: CommunityContext; options: ParsedOptions }) => {
+    const key = getPublicationEvaluationKey(args.target, args.communityContext, args.options);
+    if (!key) return evaluateContent(args);
+
+    const existing = publicationEvaluations.get(key);
+    if (existing) return existing;
+
+    const evaluation = evaluateContent(args);
+    if (publicationEvaluations.size >= MAX_CACHE_ENTRIES) {
+        const firstKey = publicationEvaluations.keys().next().value;
+        if (typeof firstKey === "string") publicationEvaluations.delete(firstKey);
+    }
+    publicationEvaluations.set(key, evaluation);
+    const forget = () => {
+        const timeout = setTimeout(() => {
+            if (publicationEvaluations.get(key) === evaluation) publicationEvaluations.delete(key);
+        }, BRANCH_PAIR_REUSE_TTL_MS);
+        timeout.unref?.();
+    };
+    evaluation.then(forget, forget);
+    return evaluation;
+};
+
 const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInput> => {
     const parsedOptions = parseOptions(args.challengeSettings);
     if (!parsedOptions.success) {
@@ -2456,13 +2508,14 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
         return { success: false, error: duplicateMediaRejection };
     }
 
+    let result: ChallengeResultInput;
     try {
         const response = await evaluate({
             target: moderationTarget.target,
             communityContext,
             options
         });
-        return getBranchResult(
+        result = getBranchResult(
             moderationTarget.kind,
             options,
             response.verdict,
@@ -2473,7 +2526,7 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
             communityContext
         );
     } catch (error) {
-        return getFallbackResult({
+        result = getFallbackResult({
             kind: moderationTarget.kind,
             options,
             error,
@@ -2482,6 +2535,11 @@ const getChallenge = async (args: GetChallengeArgs): Promise<ChallengeResultInpu
             communityContext
         });
     }
+
+    if (options.rejectDuplicateMedia && options.branch === "allow" && !result.success) {
+        releaseDuplicateMediaReservation(moderationTarget.target, communityContext);
+    }
+    return result;
 };
 
 // Publishing these in community.challenges[i].publicOptions hands out a credential; every other option is

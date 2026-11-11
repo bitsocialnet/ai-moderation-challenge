@@ -248,7 +248,21 @@ const formatPost = (rawEntry) => {
     };
 };
 
-class PublicationRejectedError extends Error {}
+// Rejection reasons meaning the comment was purged or never reached the community, so moderating it can never
+// succeed. pkc-js checks that the target exists before the moderator role and rejects with
+// ERR_PUBLICATION_PARENT_DOES_NOT_EXIST_IN_COMMUNITY; ERR_COMMENT_MODERATION_NO_COMMENT_TO_EDIT is its later check
+// for the same case. pkc-js does not export its messages, hence the copies.
+const COMMENT_GONE_REJECTION_REASONS = new Set([
+    "The parent of this publication does not exist within the community's records",
+    "CommentModerationPubsubMessagePublication is attempting to moderate a comment that does not exist"
+]);
+
+class PublicationRejectedError extends Error {
+    constructor(message, reason) {
+        super(message);
+        this.reason = reason;
+    }
+}
 
 const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, label }) =>
     new Promise((resolve, reject) => {
@@ -267,7 +281,12 @@ const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, l
         publication.on("challengeverification", (verification) => {
             clearTimeout(timeout);
             if (verification?.challengeSuccess === false) {
-                reject(new PublicationRejectedError(`Mod log community rejected ${label}: ${verification.reason || "unknown reason"}`));
+                reject(
+                    new PublicationRejectedError(
+                        `Mod log community rejected ${label}: ${verification.reason || "unknown reason"}`,
+                        verification.reason
+                    )
+                );
                 return;
             }
             resolve(verification);
@@ -317,39 +336,43 @@ const moderate = async ({ pkc, signer, community, cid, commentModeration, timeou
 
 // Keeps the mod log bounded the way 5chan-board-manager bounds a board: posts beyond the newest --keep-posts are
 // archived, and archived posts are purged after --archive-purge-seconds. Only posts this publisher recorded in its
-// state are touched. Any failure other than a rejection stops the pass and leaves the entry for the next one.
+// state are touched. Any failure other than the post being gone stops the pass and leaves the entry for the next one.
 export const pruneModLog = async ({ args, pkc, signer, state, challengeAnswer, now = Math.round(Date.now() / 1000), save }) => {
     if (args.keepPosts === undefined || args.dryRun) return;
     state.posts ??= [];
     state.archived ??= [];
     const options = { pkc, signer, community: args.community, timeoutMs: args.timeoutMs, challengeAnswer };
 
-    // Resolves false when the community rejects the moderation; it cannot succeed later, so the entry is dropped.
+    // "gone" when the community no longer has the post; that cannot change, so the entry is dropped. Other rejections
+    // (for example a signer that is not a moderator yet) can succeed later: "retry" keeps the entry and ends the pass
+    // without throwing, so a --follow publisher keeps mirroring audit entries and retries on its next pass.
     const run = async (cid, commentModeration) => {
         try {
             await moderate({ ...options, cid, commentModeration });
-            return true;
+            return "done";
         } catch (error) {
             if (!(error instanceof PublicationRejectedError)) throw error;
             console.error(error.message);
-            return false;
+            return COMMENT_GONE_REJECTION_REASONS.has(error.reason) ? "gone" : "retry";
         }
     };
 
     while (state.posts.length > args.keepPosts) {
         const [oldest] = state.posts;
-        const archived = await run(oldest.cid, {
+        const outcome = await run(oldest.cid, {
             archived: true,
             reason: `AI moderation log: archived, older than the newest ${args.keepPosts} entries`
         });
+        if (outcome === "retry") return;
         state.posts.shift();
-        if (archived) state.archived.push({ cid: oldest.cid, archivedAt: now });
+        if (outcome === "done") state.archived.push({ cid: oldest.cid, archivedAt: now });
         await save();
     }
 
     while (state.archived.length > 0 && now - state.archived[0].archivedAt >= args.archivePurgeSeconds) {
         const [expired] = state.archived;
-        await run(expired.cid, { purged: true, reason: "AI moderation log: purged, archive retention expired" });
+        const outcome = await run(expired.cid, { purged: true, reason: "AI moderation log: purged, archive retention expired" });
+        if (outcome === "retry") return;
         state.archived.shift();
         await save();
     }
@@ -390,16 +413,48 @@ const readNewLines = async ({ auditLogPath, state, fromStart }) => {
     }
 };
 
-const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
+const parseAuditEntry = (line) => {
+    try {
+        const entry = JSON.parse(line);
+        return entry && typeof entry === "object" ? entry : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+export const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
+    // Compare resolved paths so a relative and an absolute spelling of one file keep the same cursor.
+    const auditLog = resolve(args.auditLog);
+    if (state.offset !== undefined && typeof state.auditLog === "string" && resolve(state.auditLog) !== auditLog) {
+        // Keep the cursor while the new path does not exist, so a mistyped --audit-log cannot discard it.
+        if (!(await fileExists(args.auditLog))) return 0;
+        // A byte offset into another file lands mid-record here; read this audit log as if no state existed for it.
+        console.log(`Audit log changed from ${state.auditLog}; ignoring the offset stored for it`);
+        delete state.offset;
+    }
     const { lines, nextOffset } = await readNewLines({
         auditLogPath: args.auditLog,
         state,
         fromStart: args.fromStart
     });
 
+    const saveOffset = async (offset) => {
+        state.offset = offset;
+        state.updatedAt = new Date().toISOString();
+        state.auditLog = auditLog;
+        state.community = args.community;
+        await writeJsonFile(args.state, state, 0o600);
+    };
+
     let publishedCount = 0;
     for (const { line, offsetAfter } of lines) {
-        const entry = JSON.parse(line);
+        const entry = parseAuditEntry(line);
+        if (!entry) {
+            // An unreadable line can never be published; skip it instead of blocking every later entry behind it.
+            console.error(`Skipping audit log line ending at byte ${offsetAfter}: not a JSON object`);
+            if (!args.dryRun) await saveOffset(offsetAfter);
+            continue;
+        }
         if (args.dryRun) {
             const post = formatPost(entry);
             console.log(`--- ${post.title} ---\n${post.content}\n`);
@@ -416,17 +471,14 @@ const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
                 state.posts ??= [];
                 state.posts.push({ cid, publishedAt: Math.round(Date.now() / 1000) });
             }
-            state.offset = offsetAfter;
-            state.updatedAt = new Date().toISOString();
-            state.auditLog = args.auditLog;
-            state.community = args.community;
-            await writeJsonFile(args.state, state, 0o600);
+            await saveOffset(offsetAfter);
         }
         publishedCount += 1;
     }
 
     if (!args.dryRun && lines.length === 0 && state.offset === undefined) {
         state.offset = nextOffset;
+        state.auditLog = auditLog;
         await writeJsonFile(args.state, state, 0o600);
     }
 
@@ -435,6 +487,20 @@ const processOnce = async ({ args, pkc, signer, state, challengeAnswer }) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export const loadState = async (args) => {
+    const state = await readJsonFile(args.state, {});
+    if (state.community && state.community !== args.community && (state.posts?.length || state.archived?.length)) {
+        // Tracked posts belong to the previous mod-log community; never moderate them in the new one.
+        console.log(`Mod log community changed from ${state.community}; no longer tracking its posts for archiving`);
+        state.posts = [];
+        state.archived = [];
+        state.community = args.community;
+        // Persist the reset now: every follow-mode pass reloads the state file and would bring the old posts back.
+        if (!args.dryRun) await writeJsonFile(args.state, state, 0o600);
+    }
+    return state;
+};
+
 const main = async () => {
     const args = parseArgs(process.argv.slice(2));
     args.auditLog = expandHome(args.auditLog);
@@ -442,13 +508,7 @@ const main = async () => {
     args.signer = expandHome(args.signer);
     args.challengeAnswerFile = expandHome(args.challengeAnswerFile);
 
-    let state = await readJsonFile(args.state, {});
-    if (state.community && state.community !== args.community && (state.posts?.length || state.archived?.length)) {
-        // Tracked posts belong to the previous mod-log community; never moderate them in the new one.
-        console.log(`Mod log community changed from ${state.community}; no longer tracking its posts for archiving`);
-        state.posts = [];
-        state.archived = [];
-    }
+    let state = await loadState(args);
     const challengeAnswer = args.challengeAnswer || (await readOptionalTextFile(args.challengeAnswerFile));
     const pkc = args.dryRun ? undefined : await PKC({ pkcRpcClientsOptions: [args.pkcRpcUrl], resolveAuthorNames: false });
     const signer = pkc ? await loadOrCreateSigner(pkc, args.signer) : undefined;
