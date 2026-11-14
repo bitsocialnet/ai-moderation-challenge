@@ -7,3 +7,6 @@ badges
 .env
 .env.*
 !.env.example
+
+# Local Cursor configuration
+/.cursor/

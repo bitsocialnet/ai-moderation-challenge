@@ -6,5 +6,5 @@ These rules apply to `scripts/**`. Follow the repo-root `AGENTS.md` first, then 
 - Use repo-relative paths and environment variables instead of user-specific absolute paths.
 - Keep shell helpers thin. When logic becomes stateful or cross-platform, prefer a Node script.
 - Git and worktree helpers must validate input and default to safe operations.
-- Shared hook implementations live under `scripts/agent-hooks/`; `.codex/hooks/`, `.cursor/hooks/`, and `.claude/hooks/` should stay thin wrappers.
+- Shared hook implementations live under `scripts/agent-hooks/`; `.codex/hooks/` and `.claude/hooks/` should stay thin wrappers.
 - Do not perform Git cleanup from lifecycle hooks. Explicit Git helpers must verify ownership and preserve unrelated changes.
