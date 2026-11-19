@@ -63,6 +63,7 @@
         "@vitest/coverage-v8": "4.1.12",
         "esbuild": "0.28.1",
         "js-yaml": "4.3.2",
+        "modern-web-guidance": "1.0.0",
         "prettier": "3.8.1",
         "release-it": "19.2.3",
         "smol-toml": "1.9.0",

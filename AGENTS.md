@@ -52,6 +52,7 @@ Agents may use compiled context to navigate quickly, but must verify against sou
 | Runtime `src/**`                                                       | Read `src/AGENTS.md`; choose checks with `docs/agent-playbooks/verification.md`.                     |
 | Tests                                                                  | Read `tests/AGENTS.md`; run the affected tests.                                                      |
 | Provider parsing, prompts, cache keys, secrets, or branch semantics    | Add focused Vitest coverage; use the moderation-reviewer checklist when a separate review is useful. |
+| Offline review form controls, focus behavior, or browser APIs          | Consult [Modern Web Guidance](.agents/skills/modern-web-guidance/SKILL.md).                          |
 | Dependency manifest                                                    | Run `corepack yarn install` and include the lockfile.                                                |
 | Public docs or AI context                                              | Run `corepack yarn llms:generate` and include `llms*.txt`.                                           |
 | Release                                                                | Use the release skill within the requested preview/preparation/publication boundary.                 |
