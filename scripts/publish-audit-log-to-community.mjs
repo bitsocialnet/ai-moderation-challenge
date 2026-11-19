@@ -250,19 +250,30 @@ const formatPost = (rawEntry) => {
 
 class PublicationRejectedError extends Error {}
 
-const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, label }) =>
+// The publisher runs on the pkc-js of the node's CLI. Before pkc-js 0.0.152 a CHALLENGE lists the pending challenges
+// as an array and answers go back by position; from 0.0.152 both are records keyed by challenge index, and arrays are
+// rejected. Answering the first pending challenge in the shape the CHALLENGE arrived in works on both.
+const challengeAnswersFor = (challenges, challengeAnswer) => {
+    if (Array.isArray(challenges)) return [challengeAnswer];
+    const [firstIndex] = Object.keys(challenges).sort((a, b) => Number(a) - Number(b));
+    return { [firstIndex]: challengeAnswer };
+};
+
+export const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, label }) =>
     new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`Timed out publishing ${label}`)), timeoutMs);
         timeout.unref?.();
 
-        publication.on("challenge", () => {
+        publication.on("challenge", (challengeMessage) => {
             if (!challengeAnswer) {
                 clearTimeout(timeout);
                 reject(new Error("Mod log community requested a challenge answer, but no challenge answer was configured"));
                 return;
             }
 
-            publication.publishChallengeAnswers({ challengeAnswers: [challengeAnswer] }).catch(reject);
+            publication
+                .publishChallengeAnswers({ challengeAnswers: challengeAnswersFor(challengeMessage.challenges, challengeAnswer) })
+                .catch(reject);
         });
         publication.on("challengeverification", (verification) => {
             clearTimeout(timeout);
@@ -283,8 +294,6 @@ const publishWithChallengeAnswer = (publication, { challengeAnswer, timeoutMs, l
         });
     });
 
-const challengeRequestOptions = (challengeAnswer) => (challengeAnswer ? { challengeRequest: { challengeAnswers: [challengeAnswer] } } : {});
-
 const publishPost = async ({ pkc, signer, community, entry, timeoutMs, challengeAnswer }) => {
     const post = formatPost(entry);
     const comment = await pkc.createComment({
@@ -293,8 +302,7 @@ const publishPost = async ({ pkc, signer, community, entry, timeoutMs, challenge
         signer,
         title: post.title,
         content: post.content,
-        timestamp: Math.round(Date.now() / 1000),
-        ...challengeRequestOptions(challengeAnswer)
+        timestamp: Math.round(Date.now() / 1000)
     });
     const verification = await publishWithChallengeAnswer(comment, {
         challengeAnswer,
@@ -309,8 +317,7 @@ const moderate = async ({ pkc, signer, community, cid, commentModeration, timeou
         communityAddress: community,
         signer,
         commentCid: cid,
-        commentModeration,
-        ...challengeRequestOptions(challengeAnswer)
+        commentModeration
     });
     await publishWithChallengeAnswer(moderation, { challengeAnswer, timeoutMs, label: `moderation of ${cid}` });
 };
