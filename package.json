@@ -58,7 +58,7 @@
         "zod": "4.3.5"
     },
     "devDependencies": {
-        "@pkcprotocol/pkc-js": "0.0.85",
+        "@pkcprotocol/pkc-js": "0.0.163",
         "@release-it/conventional-changelog": "10.0.1",
         "@vitest/coverage-v8": "4.1.12",
         "esbuild": "0.28.1",
@@ -72,7 +72,6 @@
     },
     "resolutions": {
         "@conventional-changelog/git-client@npm:^1.0.0": "npm:2.7.0",
-        "@libp2p/gossipsub": "16.0.5",
         "@libp2p/kad-dht@npm:^16.2.0": "npm:16.2.6",
         "@protobufjs/utf8@npm:^1.1.0": "npm:1.1.1",
         "axios@npm:^1.7.2": "npm:1.20.0",
