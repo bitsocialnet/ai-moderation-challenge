@@ -29,7 +29,7 @@ import {
     type ReasoningEffort
 } from "./schema.js";
 
-const log = Logger("bitsocial:community:challenge:ai-moderation");
+const log = Logger({ namespace: "bitsocial:community:challenge:ai-moderation" });
 const LEGACY_RUNTIME_COMMUNITY_KEY = String.fromCharCode(115, 117, 98, 112, 108, 101, 98, 98, 105, 116);
 const MAX_CACHE_ENTRIES = 1000;
 const MAX_JSON_CACHE_ENTRIES = 10_000;
